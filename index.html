@@ -76,7 +76,12 @@ video[hidden]{display:none}
    over it: our click handling wins, and its own controls stay unreachable. */
 #ytwrap{position:absolute;inset:0;display:none;background:#000}
 #ytwrap.on{display:block}
-#ytwrap iframe{width:100%;height:100%;border:0;display:block}
+/* #yt is the div YT.Player replaces with its iframe. It needs a real height:
+   an iframe whose height:100% can't resolve falls back to the CSS default for
+   replaced elements, 300x150 — which is how you get a full-width, 150px-tall
+   player. Both the placeholder and the iframe that supplants it are pinned. */
+#yt{position:absolute;inset:0}
+#yt > *{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
 .shield{position:absolute;inset:0;z-index:2}
 
 .empty{position:absolute;inset:0;display:grid;place-content:center;place-items:center;
