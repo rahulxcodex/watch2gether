@@ -76,7 +76,7 @@ const R = {
   state: null, members: [], progress: {},
   offset: 0,                       // Firebase hands us the server clock skew
   cues: [], cueTrack: null, cueIdx: -1, localSub: null,
-  ccOn: true, delay: 0,
+  ccOn: true, delay: 0, ytCC: false,
   dragging: false, blocked: false, seenSep: false, shownResume: "",
   refs: {},
 };
@@ -379,10 +379,12 @@ async function mountYT(videoId) {
 
   PL.yt = new YT.Player(host, {
     videoId,
+    width: "100%",
+    height: "100%",
     // controls:0 hands the whole interface to ours, so speed, subtitles and
     // the drift ribbon stay consistent across every kind of source.
     playerVars: {
-      controls: 0, disablekb: 1, modestbranding: 1, rel: 0,
+      controls: 0, disablekb: 1, modestbranding: 1, rel: 0, cc_load_policy: 0,
       playsinline: 1, iv_load_policy: 3, fs: 0, autoplay: 0, origin: location.origin,
     },
     events: {
@@ -391,7 +393,16 @@ async function mountYT(videoId) {
         PL.setVol(LOOK.vol);
         PL.setMuted(false);
         $("#tEnd").textContent = fmtTime(PL.dur());
+        drawTracks();
         hardSync();
+        // The real title is only knowable once the player has loaded, so the
+        // placeholder gets swapped out here rather than at paste time.
+        try {
+          const real = PL.yt.getVideoData?.().title;
+          if (real && R.state?.title === "YouTube video" && canDrive()) {
+            update(R.refs.state, { title: real.slice(0, 200) });
+          }
+        } catch {}
       },
       onStateChange: (e) => {
         setStall(e.data === 3);
@@ -999,6 +1010,20 @@ function drawTracks() {
     box.appendChild(b);
   }
 
+  if (PL.kind === "yt" && PL.ytReady) {
+    const b = document.createElement("button");
+    b.className = "chip" + (R.ytCC ? " on" : "");
+    b.textContent = "YouTube CC";
+    b.title = "YouTube's own captions — these can't be restyled";
+    b.onclick = () => {
+      R.ytCC = !R.ytCC;
+      try { R.ytCC ? PL.yt.loadModule("captions") : PL.yt.unloadModule("captions"); }
+      catch { say("This video has no YouTube captions."); }
+      drawTracks();
+    };
+    box.appendChild(b);
+  }
+
   for (const s of R.state?.subs || []) {
     const b = document.createElement("button");
     b.className = "chip" + (s.key === R.cueTrack ? " on" : "");
@@ -1007,7 +1032,7 @@ function drawTracks() {
     box.appendChild(b);
   }
 
-  if (!R.localSub && !(R.state?.subs || []).length) {
+  if (!R.localSub && !(R.state?.subs || []).length && PL.kind !== "yt") {
     const n = document.createElement("span");
     n.style.cssText = "font-size:12px;color:var(--dimmer);align-self:center";
     n.textContent = "Drop an .srt on the panel to add one.";
