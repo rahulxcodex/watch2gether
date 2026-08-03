@@ -195,27 +195,41 @@ function wireRoom() {
     set(R.refs.me, {
       name: R.name, pos: 0, dur: 0, stalled: false,
       voice: VOICE.on, noFile: false, at: serverTimestamp(),
-    });
+    }).catch((e) => fbError(e, "presence write"));
   });
 
   runTransaction(R.refs.state, (cur) => {
-    if (cur === null) {
-      return {
-        kind: "none", ref: "", title: "", label: "",
-        playing: false, pos: 0, rate: 1, at: Date.now(),
-        hostId: R.uid, locked: false, pauseOnBuffer: true, resumeAt: 0,
-      };
+    const blank = {
+      kind: "none", ref: "", title: "", label: "",
+      playing: false, pos: 0, rate: 1, at: Date.now(),
+      hostId: R.uid, locked: false, pauseOnBuffer: true,
+    };
+    if (cur === null) return blank;
+    // Fill any gaps rather than passing the node back as-is. A state missing
+    // one field — `rate`, say — failed validation on every subsequent write,
+    // including the write that would have repaired it. Rooms in that condition
+    // were permanently stuck; this heals them the next time someone joins.
+    for (const k of Object.keys(blank)) {
+      if (cur[k] === undefined || cur[k] === null) cur[k] = blank[k];
     }
-    if (!cur.hostId) cur.hostId = R.uid;
     return cur;
-  });
+  }).catch((e) => fbError(e, "room setup"));
 
   onValue(R.refs.state, (s) => {
     const st = s.val();
     if (!st) return;
     R.state = st;
     applyState(st);
-  });
+  }, (e) => fbError(e, "room read"));
+
+  // If the room never materialises, say so rather than sitting there blank.
+  setTimeout(() => {
+    if (!R.state) {
+      $("#emptyMsg").textContent =
+        "Connected, but the room never loaded. Almost always the database rules — " +
+        "open the browser console for the exact error.";
+    }
+  }, 6000);
 
   onValue(R.refs.members, (s) => {
     const val = s.val() || {};
@@ -258,11 +272,34 @@ const canDrive = () =>
   !R.state?.locked || !R.state.hostId || R.state.hostId === R.uid;
 
 function ctl(patch) {
-  if (!R.state) return;
+  if (!R.state) return say("Still joining the room — give it a second.");
   if (!canDrive()) return say("The host has playback locked.");
+  // Always carry playing/pos/rate. Without them a partial patch could land on
+  // a partial node and leave it partial forever.
+  patch = {
+    playing: R.state.playing ?? false,
+    pos: R.state.pos ?? 0,
+    rate: R.state.rate ?? 1,
+    ...patch,
+  };
   // `at` is the instant `pos` was true. Restamping it without a fresh `pos`
   // would silently rewind everyone, so only position-carrying writes get it.
-  update(R.refs.state, "pos" in patch ? { ...patch, at: serverTimestamp() } : patch);
+  update(R.refs.state, "pos" in patch ? { ...patch, at: serverTimestamp() } : patch)
+    .catch((e) => fbError(e, "playback update"));
+}
+
+/* A rejected write used to fail in silence, which is the worst possible way for
+   a rules mismatch to present itself: the app simply sits there. Now it says
+   which write was refused and why. */
+function fbError(e, what) {
+  const msg = String(e?.message || e);
+  console.error(`[parallel] ${what} refused:`, e);
+  if (/permission|PERMISSION_DENIED/i.test(msg)) {
+    say(`The database refused the ${what}. Your rules don't allow it — ` +
+        `publish firebase/database.rules.json, then reload.`);
+  } else {
+    say(`${what} failed: ${msg}`);
+  }
 }
 
 const serverNow = () => Date.now() + R.offset;
@@ -399,8 +436,8 @@ async function mountYT(videoId) {
         // placeholder gets swapped out here rather than at paste time.
         try {
           const real = PL.yt.getVideoData?.().title;
-          if (real && R.state?.title === "YouTube video" && canDrive()) {
-            update(R.refs.state, { title: real.slice(0, 200) });
+          if (real && R.state?.kind === "yt" && R.state.title === "YouTube video") {
+            ctl({ title: real.slice(0, 200) });
           }
         } catch {}
       },
@@ -1403,7 +1440,8 @@ $("#chatIn").addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   const text = e.target.value.trim();
   if (!text) return;
-  push(R.refs.chat, { uid: R.uid, name: R.name, text, at: serverTimestamp() });
+  push(R.refs.chat, { uid: R.uid, name: R.name, text, at: serverTimestamp() })
+    .catch((e) => fbError(e, "chat message"));
   e.target.value = "";
 });
 
