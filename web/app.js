@@ -501,6 +501,7 @@ function destroyYT() {
 }
 
 function showSurface(which) {
+  if (which !== "file") killHls();
   PL.kind = which;
   $("#ytwrap").classList.toggle("on", which === "yt");
   v.hidden = which === "yt" || which === "none";
@@ -513,6 +514,131 @@ function showSurface(which) {
     ? "YouTube's own captions can't be restyled from outside. Drop an .srt onto the panel to use one these settings apply to."
     : "";
 }
+
+/* ============================================================ audio tracks
+ * An awkward corner of the platform. A plain MP4 can carry several audio
+ * tracks, but Chrome has never exposed HTMLMediaElement.audioTracks, so there
+ * is no way to reach them there — Safari can, Firefox can behind a pref.
+ *
+ * HLS sidesteps it: hls.js parses the alternate renditions itself and switches
+ * them in software, which works in every browser. So multi-audio is reliable
+ * exactly when the source is an .m3u8, and the panel says so plainly rather
+ * than showing an empty box.
+ * ======================================================================== */
+
+const AUDIO = { hls: null, tracks: [], current: -1 };
+
+let hlsApi;
+const loadHls = () => (hlsApi ||= new Promise((ok, no) => {
+  if (window.Hls) return ok(window.Hls);
+  const el = document.createElement("script");
+  el.src = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+  el.onload = () => ok(window.Hls);
+  el.onerror = () => no(new Error("blocked"));
+  document.head.appendChild(el);
+  setTimeout(() => no(new Error("timeout")), 12000);
+}));
+
+async function mountUrl(url) {
+  killHls();
+  // Safari plays HLS natively and exposes its audio tracks, so leave it be.
+  if (/\.m3u8(\?|$)/i.test(url) && !v.canPlayType("application/vnd.apple.mpegurl")) {
+    try {
+      const Hls = await loadHls();
+      if (!Hls.isSupported()) throw new Error("unsupported");
+      AUDIO.hls = new Hls({ maxBufferLength: 40 });
+      AUDIO.hls.on(Hls.Events.MANIFEST_PARSED, () => { drawAudio(); drawQuals(); });
+      AUDIO.hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, drawAudio);
+      AUDIO.hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, drawAudio);
+      AUDIO.hls.on(Hls.Events.ERROR, (_, d) => {
+        if (d.fatal) say("The stream failed: " + (d.details || d.type));
+      });
+      AUDIO.hls.loadSource(url);
+      AUDIO.hls.attachMedia(v);
+      return;
+    } catch {
+      say("Couldn't load the HLS player — trying direct playback.");
+    }
+  }
+  v.src = url;
+}
+
+function killHls() {
+  if (AUDIO.hls) { try { AUDIO.hls.destroy(); } catch {} AUDIO.hls = null; }
+  AUDIO.tracks = [];
+  AUDIO.current = -1;
+}
+
+const AUDIO_LANGS = {
+  en: "English", hi: "हिन्दी", ta: "தமிழ்", te: "తెలుగు", bn: "বাংলা",
+  mr: "मराठी", pa: "ਪੰਜਾਬੀ", ur: "اردو", es: "Español", fr: "Français",
+  de: "Deutsch", ja: "日本語", ko: "한국어", zh: "中文", ru: "Русский",
+  pt: "Português", it: "Italiano", ar: "العربية", tr: "Türkçe", id: "Bahasa",
+};
+const langName = (c) => AUDIO_LANGS[String(c || "").slice(0, 2).toLowerCase()] || "";
+
+/* Also reports how we're reading, so the empty case can explain itself. */
+function readAudio() {
+  if (AUDIO.hls) {
+    AUDIO.tracks = (AUDIO.hls.audioTracks || []).map((t, i) => ({
+      i, label: t.name || langName(t.lang) || t.lang || `Track ${i + 1}`,
+    }));
+    AUDIO.current = AUDIO.hls.audioTrack;
+    return "hls";
+  }
+  const nat = v.audioTracks;
+  if (nat === undefined) { AUDIO.tracks = []; return "unsupported"; }
+  AUDIO.tracks = [...nat].map((t, i) => ({
+    i, label: t.label || langName(t.language) || t.language || `Track ${i + 1}`,
+  }));
+  AUDIO.current = [...nat].findIndex((t) => t.enabled);
+  return "native";
+}
+
+function setAudio(i) {
+  if (AUDIO.hls) AUDIO.hls.audioTrack = i;
+  else if (v.audioTracks) {
+    for (let k = 0; k < v.audioTracks.length; k++) v.audioTracks[k].enabled = k === i;
+  }
+  AUDIO.current = i;
+  drawAudio();
+  say(`Audio: ${AUDIO.tracks[i]?.label || i + 1}`);
+}
+
+function drawAudio() {
+  const box = $("#audios"), note = $("#audioNote");
+  if (!box) return;
+  const mode = readAudio();
+  box.innerHTML = "";
+  note.textContent = "";
+
+  if (AUDIO.tracks.length > 1) {
+    for (const t of AUDIO.tracks) {
+      const b = document.createElement("button");
+      b.className = "chip" + (t.i === AUDIO.current ? " on" : "");
+      b.textContent = t.label;
+      b.onclick = () => setAudio(t.i);
+      box.appendChild(b);
+    }
+    note.textContent = "Picked per person — the two of you can watch in different languages.";
+    return;
+  }
+
+  const oneLine = R.state?.kind === "yt"
+    ? "YouTube's embed API exposes no audio-track control."
+    : "One audio track.";
+  box.innerHTML = `<span style="font-size:12px;color:var(--dimmer)">${oneLine}</span>`;
+
+  if (mode === "unsupported" && R.state?.kind !== "yt" && R.state?.kind !== "none") {
+    note.textContent = "This browser can't reach extra audio tracks inside an MP4 — " +
+      "Chrome has never implemented it. Package the file as HLS and switching " +
+      "works everywhere. Recipe in HOSTING.md.";
+  }
+}
+
+v.addEventListener("loadedmetadata", drawAudio);
+v.audioTracks?.addEventListener?.("addtrack", drawAudio);
+v.audioTracks?.addEventListener?.("change", drawAudio);
 
 /* ======================================================== the sync loop */
 
@@ -670,9 +796,24 @@ async function resolveArchive(id) {
 $("#urlGo").onclick = playPasted;
 $("#urlIn").addEventListener("keydown", (e) => e.key === "Enter" && playPasted());
 
+const SUB_URL_RE = /\.(srt|vtt|ass|ssa)(\?|$)/i;
+
 async function playPasted() {
   const raw = $("#urlIn").value.trim();
   if (!raw) return;
+
+  /* A subtitle URL pasted while something is playing attaches to it rather
+     than trying to play it — that's the only sensible reading. */
+  if (SUB_URL_RE.test(raw) && R.state && R.state.kind !== "none") {
+    const name = decodeURIComponent(raw.split("?")[0].split("/").pop() || "");
+    const label = name.replace(/\.[^.]+$/, "").slice(-24) || "Subtitles";
+    const subs = [...(R.state.subs || []).filter((x) => x.key !== raw),
+                  { key: raw, label }].slice(0, 12);
+    ctl({ subs });
+    $("#urlIn").value = "";
+    pickTrack(raw);
+    return say("Subtitle track added — it saves with the shelf entry.");
+  }
 
   const arc = raw.match(ARCHIVE_RE);
   if (arc) {
@@ -859,6 +1000,7 @@ function applyState(s) {
   paintPlay();
   drawHosts();
   drawTracks();
+  drawAudio();
   $("#saveBtn").hidden = !["url", "yt"].includes(s.kind) ||
                           SHELF.some((e) => e.ref === s.ref);
   offerResume(s);
@@ -884,7 +1026,7 @@ function mountSource(s) {
     case "r2": {
       showSurface("file");
       $("#empty").style.display = "none";
-      v.src = s.kind === "r2" ? mediaUrl(s.ref) : s.ref;
+      mountUrl(s.kind === "r2" ? mediaUrl(s.ref) : s.ref);
       const first = (s.subs || [])[0];
       if (first) pickTrack(first.key);
       break;
@@ -1066,7 +1208,13 @@ async function pickTrack(key) {
   if (key === "local") return setCues(R.localSub?.cues || []);
   try {
     setCues(parseSubs(await (await fetch(mediaUrl(key))).text()));
-  } catch { setCues([]); say("Couldn't load that subtitle file."); }
+  } catch {
+    setCues([]);
+    say(/^https?:/i.test(key)
+      ? "Couldn't fetch that subtitle file — the host needs a CORS rule allowing " +
+        "this site. Dropping the .srt onto the panel works regardless."
+      : "Couldn't load that subtitle file.");
+  }
 }
 
 function drawTracks() {
@@ -1784,6 +1932,22 @@ function drawQuals() {
   const box = $("#quals");
   box.innerHTML = "";
   const s = R.state;
+
+  // An HLS stream brings its own ladder, so surface that instead of the
+  // separate-files-per-quality scheme the bucket uses.
+  if (AUDIO.hls && (AUDIO.hls.levels || []).length > 1) {
+    const mk = (label, level) => {
+      const b = document.createElement("button");
+      b.className = "chip" + (AUDIO.hls.currentLevel === level ? " on" : "");
+      b.textContent = label;
+      b.onclick = () => { AUDIO.hls.currentLevel = level; drawQuals(); };
+      box.appendChild(b);
+    };
+    mk("Auto", -1);
+    AUDIO.hls.levels.forEach((l, i) =>
+      mk(l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}k`, i));
+    return;
+  }
   if (!s || s.kind !== "r2") {
     box.innerHTML = `<span style="font-size:12px;color:var(--dimmer)">${
       s?.kind === "yt" ? "YouTube picks its own quality per viewer."
