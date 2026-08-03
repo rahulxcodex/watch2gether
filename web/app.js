@@ -333,14 +333,29 @@ const PL = {
   kind: "none",
   yt: null,
   ytReady: false,
+  readyWatch: 0,
+  baseDur: 0,        // the film's real length, captured before any ad runs
 
   time() {
     if (this.kind === "yt") return this.ytReady ? this.yt.getCurrentTime() || 0 : 0;
     return v.currentTime || 0;
   },
   dur() {
-    if (this.kind === "yt") return this.ytReady ? this.yt.getDuration() || 0 : 0;
+    if (this.kind === "yt") {
+      // Hold the real length: mid-ad, getDuration() reports the ad's instead,
+      // which would make the scrubber jump and the drift maths nonsense.
+      if (this.baseDur) return this.baseDur;
+      return this.ytReady ? this.yt.getDuration() || 0 : 0;
+    }
     return isFinite(v.duration) ? v.duration : 0;
+  },
+
+  /* No API tells you an ad is running. But the reported duration changing out
+     from under an already-loaded video is a reliable enough tell. */
+  adPlaying() {
+    if (this.kind !== "yt" || !this.ytReady || !this.baseDur) return false;
+    const d = this.yt.getDuration() || 0;
+    return d > 0 && Math.abs(d - this.baseDur) > 2;
   },
   seek(t) {
     if (this.kind === "yt") { if (this.ytReady) this.yt.seekTo(Math.max(0, t), true); }
@@ -380,7 +395,9 @@ const PL = {
     return 0;
   },
   stalled() {
-    if (this.kind === "yt") return this.ytReady && this.yt.getPlayerState() === 3;
+    if (this.kind === "yt") {
+      return this.ytReady && (this.yt.getPlayerState() === 3 || this.adPlaying());
+    }
     return v.readyState < 3 && !v.paused;
   },
 };
@@ -414,6 +431,17 @@ async function mountYT(videoId) {
   const host = document.createElement("div");
   $("#yt").appendChild(host);
 
+  clearTimeout(PL.readyWatch);
+  PL.readyWatch = setTimeout(() => {
+    if (PL.ytReady) return;
+    say("YouTube's player didn't finish loading — an ad blocker or privacy " +
+        "extension is the usual cause. Allowlist this site and reload.");
+    $("#emptyMsg").textContent =
+      "YouTube's player never became ready. Try allowlisting this site in your " +
+      "ad blocker, or use a direct video link or a local file instead.";
+    $("#empty").style.display = "grid";
+  }, 12000);
+
   PL.yt = new YT.Player(host, {
     videoId,
     width: "100%",
@@ -426,7 +454,9 @@ async function mountYT(videoId) {
     },
     events: {
       onReady: () => {
+        clearTimeout(PL.readyWatch);
         PL.ytReady = true;
+        PL.baseDur = PL.yt.getDuration() || 0;
         PL.setVol(LOOK.vol);
         PL.setMuted(false);
         $("#tEnd").textContent = fmtTime(PL.dur());
@@ -442,7 +472,7 @@ async function mountYT(videoId) {
         } catch {}
       },
       onStateChange: (e) => {
-        setStall(e.data === 3);
+        setStall(e.data === 3 || PL.adPlaying(), PL.adPlaying() ? "Ad playing" : "Buffering");
         pushPresence({ stalled: e.data === 3 });
         if (e.data === 1 || e.data === 2) $("#tEnd").textContent = fmtTime(PL.dur());
       },
@@ -463,7 +493,9 @@ async function mountYT(videoId) {
 }
 
 function destroyYT() {
+  clearTimeout(PL.readyWatch);
   PL.ytReady = false;
+  PL.baseDur = 0;
   if (PL.yt) { try { PL.yt.destroy(); } catch {} PL.yt = null; }
   $("#yt").innerHTML = "";
 }
@@ -494,6 +526,12 @@ function sync() {
   if (!s || s.kind === "none" || R.dragging) return;
   const dur = PL.dur();
   if (!dur) return;
+
+  if (PL.adPlaying()) {
+    setStall(true, "Ad playing");
+    $("#driftVal").textContent = "ad";
+    return;                       // don't chase a position inside someone's ad
+  }
 
   const want = expectedPos();
   const drift = want - PL.time();
@@ -954,7 +992,10 @@ v.addEventListener("error", () => {
     : "That file wouldn't play in this browser.");
 });
 
-function setStall(on) { $("#stall").classList.toggle("on", on); }
+function setStall(on, why = "Buffering") {
+  $("#stall").classList.toggle("on", on);
+  if (on) $("#stallWhy").textContent = why;
+}
 
 /* Pause everyone when one person stalls — usually wanted, occasionally
    maddening, hence the switch. */
