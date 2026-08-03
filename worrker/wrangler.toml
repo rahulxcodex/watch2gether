@@ -1,0 +1,16 @@
+# One Worker, one binding, no migrations. Room sync lives in Firebase; this
+# only lists the bucket, streams bytes, and accepts chunked uploads.
+name = "watchtogether"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Set this to your deployed page so no other site can call the Worker.
+[vars]
+ALLOW_ORIGIN = "*"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "watchtogether-media"
+
+[observability]
+enabled = true
