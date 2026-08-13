@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Parallel — watch together</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230A0D13'/%3E%3Crect x='11' y='7' width='3' height='18' rx='1.5' fill='%235EEAD4'/%3E%3Crect x='18' y='12' width='3' height='13' rx='1.5' fill='%23F5A9C4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0A0D13; --panel:#111823; --raise:#18202D;
+  --line:#232D3C; --line-soft:#1A2331;
+  --text:#E7ECF4; --dim:#8592A6; --dimmer:#5A6676;
+  --you:#5EEAD4; --them:#F5A9C4; --warn:#F2B65A;
+  --ui:"Space Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --rail:320px;
+  --sub-scale:3.1; --sub-color:#FFF; --sub-bg:rgba(0,0,0,.62);
+  --sub-bottom:9%; --sub-width:82%; --sub-weight:500;
+  --sub-family:var(--ui); --sub-edge:0 2px 10px rgba(0,0,0,.85);
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ink);color:var(--text);font-family:var(--ui);
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--you);outline-offset:2px;border-radius:4px}
+::selection{background:var(--you);color:var(--ink)}
+.eyebrow{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dimmer);font-weight:500}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ------------------------------------------------------------------ gate */
+#gate{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:24px;background:var(--ink);overflow-y:auto}
+.gate-card{width:min(420px,100%)}
+.mark{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.mark b{font-size:26px;font-weight:700;letter-spacing:-.02em}
+.mark-bars{display:flex;gap:3px;align-items:flex-end;height:20px}
+.mark-bars i{width:3px;border-radius:2px;display:block}
+.mark-bars i:nth-child(1){height:20px;background:var(--you)}
+.mark-bars i:nth-child(2){height:12px;background:var(--them)}
+.gate-lede{color:var(--dim);margin:0 0 30px;font-size:14px;max-width:34ch}
+label.field{display:block;margin-bottom:16px}
+label.field .eyebrow{display:block;margin-bottom:7px}
+.input{width:100%;padding:12px 14px;background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;transition:border-color .15s,background .15s}
+.input:focus{outline:none;border-color:var(--you);background:var(--raise)}
+.input::placeholder{color:var(--dimmer)}
+#code{font-family:var(--mono);letter-spacing:.04em}
+.row{display:flex;gap:10px}
+.row>*{flex:1}
+.btn{padding:12px 18px;border-radius:9px;font-weight:500;background:var(--raise);
+  border:1px solid var(--line);transition:background .15s,border-color .15s,transform .1s}
+.btn:hover{background:#1E2836;border-color:#2E3A4B}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:default;transform:none}
+.btn.primary{background:var(--you);color:#06231F;border-color:var(--you);font-weight:700}
+.btn.primary:hover{background:#7DF3E0;border-color:#7DF3E0}
+.btn.ghost{background:none;border-color:var(--line)}
+.gate-note{margin-top:24px;font-size:12.5px;color:var(--dimmer);line-height:1.65}
+.gate-note code{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+.err{color:var(--warn);font-size:13px;margin-top:14px;min-height:1.5em;line-height:1.5}
+
+/* ----------------------------------------------------------------- shell */
+#app{display:none;height:100dvh;grid-template-columns:1fr var(--rail)}
+#app.on{display:grid}
+#app.rail-off{grid-template-columns:1fr 0}
+
+/* ----------------------------------------------------------------- stage */
+.stage{position:relative;background:#000;overflow:hidden;min-width:0}
+video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
+video[hidden]{display:none}
+
+/* YouTube renders into an iframe we don't control, so a transparent sheet sits
+   over it: our click handling wins, and its own controls stay unreachable. */
+#ytwrap{position:absolute;inset:0;display:none;background:#000}
+#ytwrap.on{display:block}
+/* #yt is the div YT.Player replaces with its iframe. It needs a real height:
+   an iframe whose height:100% can't resolve falls back to the CSS default for
+   replaced elements, 300x150 — which is how you get a full-width, 150px-tall
+   player. Both the placeholder and the iframe that supplants it are pinned. */
+#yt{position:absolute;inset:0}
+#yt > *{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+.shield{position:absolute;inset:0;z-index:2}
+
+.empty{position:absolute;inset:0;display:grid;place-content:center;place-items:center;
+  gap:14px;text-align:center;padding:32px;background:var(--ink);z-index:3}
+.empty p{color:var(--dim);margin:0;max-width:34ch;font-size:14px;line-height:1.6}
+
+.subs{position:absolute;left:50%;transform:translateX(-50%);bottom:var(--sub-bottom);
+  width:var(--sub-width);text-align:center;pointer-events:none;z-index:4;transition:bottom .18s}
+.subs.lifted{bottom:calc(var(--sub-bottom) + 92px)}
+.subs span{display:inline-block;padding:.16em .5em;border-radius:5px;background:var(--sub-bg);
+  color:var(--sub-color);font-family:var(--sub-family);font-weight:var(--sub-weight);
+  text-shadow:var(--sub-edge);line-height:1.34;white-space:pre-wrap;text-wrap:balance}
+.subs i{font-style:italic}
+
+.stall{position:absolute;inset:0;display:grid;place-items:center;z-index:5;
+  background:rgba(6,9,14,.55);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .2s}
+.stall.on{opacity:1}
+.spinner{width:34px;height:34px;margin:0 auto 12px;border-radius:50%;
+  border:2px solid var(--line);border-top-color:var(--you);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.tap{position:absolute;inset:0;z-index:9;display:none;place-items:center;background:rgba(6,9,14,.72)}
+.tap.on{display:grid}
+
+.resume{position:absolute;left:50%;top:22px;transform:translateX(-50%);z-index:8;
+  display:none;align-items:center;gap:12px;padding:9px 10px 9px 16px;border-radius:11px;
+  background:rgba(17,24,35,.96);backdrop-filter:blur(16px);border:1px solid var(--line);
+  box-shadow:0 16px 44px rgba(0,0,0,.55);animation:drop .3s cubic-bezier(.2,.9,.3,1)}
+.resume.on{display:flex}
+@keyframes drop{from{opacity:0;transform:translate(-50%,-12px)}}
+.resume span{font-size:13.5px}
+.resume b{font-family:var(--mono);font-weight:500}
+.resume .go{padding:6px 12px;border-radius:7px;background:var(--you);color:#06231F;font-size:12.5px;font-weight:700}
+.resume .no{padding:6px 8px;color:var(--dim);font-size:12.5px}
+.resume .no:hover{color:var(--text)}
+
+/* ---------------------------------------------------------------- chrome */
+.chrome{position:absolute;left:0;right:0;bottom:0;z-index:7;padding:52px 20px 16px;
+  background:linear-gradient(to top,rgba(4,6,10,.93) 8%,rgba(4,6,10,.72) 52%,transparent);
+  transition:opacity .25s,transform .25s}
+.stage.idle .chrome{opacity:0;transform:translateY(8px);pointer-events:none}
+.stage.idle{cursor:none}
+
+/* signature: both playheads on one strip */
+.ribbon{position:relative;height:22px;margin-bottom:2px;display:flex;align-items:center}
+.ribbon-track{position:absolute;left:0;right:0;height:1px;background:var(--line)}
+.head{position:absolute;top:50%;width:2px;height:13px;border-radius:1px;
+  transform:translate(-50%,-50%);transition:left .95s linear,height .2s,opacity .2s;will-change:left}
+.head.stalled{animation:pulse .9s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.gap{position:absolute;top:50%;height:1px;transform:translateY(-50%);
+  background:repeating-linear-gradient(90deg,var(--dim) 0 2px,transparent 2px 5px);
+  opacity:0;transition:opacity .25s,left .95s linear,width .95s linear}
+.gap.on{opacity:.7}
+.gap-label{position:absolute;bottom:calc(100% + 1px);left:50%;transform:translateX(-50%);
+  font-family:var(--mono);font-size:9.5px;color:var(--dim);white-space:nowrap}
+.converged{position:absolute;top:50%;left:0;transform:translate(-50%,-50%);width:20px;height:20px;
+  border-radius:50%;border:1px solid var(--you);opacity:0;pointer-events:none}
+.converged.ping{animation:conv .55s ease-out}
+@keyframes conv{0%{opacity:.9;transform:translate(-50%,-50%) scale(.35)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.7)}}
+
+.scrub{position:relative;height:22px;display:flex;align-items:center;cursor:pointer}
+.scrub-rail{position:absolute;left:0;right:0;height:4px;border-radius:3px;background:#2A3444}
+.scrub-buf{position:absolute;left:0;height:4px;border-radius:3px;background:#3B4759;width:0}
+.scrub-fill{position:absolute;left:0;height:4px;border-radius:3px;background:var(--text);width:0}
+.scrub-knob{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:var(--text);
+  transform:translate(-50%,-50%) scale(0);transition:transform .15s;left:0}
+.scrub:hover .scrub-knob,.scrub.dragging .scrub-knob{transform:translate(-50%,-50%) scale(1)}
+.scrub-tip{position:absolute;bottom:calc(100% + 6px);transform:translateX(-50%);padding:3px 7px;
+  border-radius:5px;background:var(--raise);border:1px solid var(--line);font-family:var(--mono);
+  font-size:11px;opacity:0;pointer-events:none;transition:opacity .12s;white-space:nowrap}
+.scrub:hover .scrub-tip{opacity:1}
+
+.bar{display:flex;align-items:center;gap:4px;margin-top:8px}
+.ico{position:relative;width:38px;height:38px;border-radius:8px;display:grid;place-items:center;
+  color:var(--text);transition:background .14s,color .14s;flex:none}
+.ico:hover{background:rgba(255,255,255,.09)}
+.ico[aria-pressed=true]{color:var(--you)}
+.ico svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.ico.play svg{width:22px;height:22px}
+.ico.live{color:var(--you)}
+.ico.live::after{content:"";position:absolute;top:6px;right:6px;width:5px;height:5px;
+  border-radius:50%;background:var(--you)}
+.time{font-family:var(--mono);font-size:12.5px;color:var(--dim);padding:0 8px;white-space:nowrap}
+.time b{color:var(--text);font-weight:400}
+.spacer{flex:1}
+.now{min-width:0;font-size:12.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;padding:0 10px}
+.now b{color:var(--text);font-weight:500}
+.now .src{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--dimmer);margin-left:8px}
+.vol{display:flex;align-items:center;gap:6px}
+.vol input{width:0;opacity:0;transition:width .2s,opacity .2s;accent-color:var(--text)}
+.vol:hover input,.vol:focus-within input{width:72px;opacity:1}
+.pill{height:26px;padding:0 9px;border-radius:6px;font-family:var(--mono);font-size:11px;
+  color:var(--dim);border:1px solid var(--line);display:grid;place-items:center}
+.pill:hover{color:var(--text);border-color:#2E3A4B}
+
+/* ----------------------------------------------------------------- sheet */
+.sheet{position:absolute;right:16px;bottom:96px;z-index:8;width:308px;
+  max-height:min(460px,calc(100dvh - 190px));overflow-y:auto;overscroll-behavior:contain;
+  background:rgba(17,24,35,.96);backdrop-filter:blur(18px) saturate(1.3);
+  border:1px solid var(--line);border-radius:13px;padding:6px;
+  box-shadow:0 24px 60px rgba(0,0,0,.6);opacity:0;transform:translateY(8px) scale(.98);
+  pointer-events:none;transition:opacity .16s,transform .16s}
+.sheet.on{opacity:1;transform:none;pointer-events:auto}
+.sheet::-webkit-scrollbar{width:8px}
+.sheet::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+.tabs{display:flex;gap:2px;padding:4px 4px 8px;border-bottom:1px solid var(--line-soft);margin-bottom:6px}
+.tab{flex:1;padding:7px;border-radius:7px;font-size:12px;color:var(--dim);transition:background .14s,color .14s}
+.tab:hover{color:var(--text)}
+.tab.on{background:var(--raise);color:var(--text)}
+.set{padding:8px 10px 10px}
+.set + .set{border-top:1px solid var(--line-soft)}
+.set-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px;gap:10px}
+.set-head .val{font-family:var(--mono);font-size:11px;color:var(--text)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{padding:6px 10px;border-radius:7px;font-size:12px;color:var(--dim);background:var(--raise);
+  border:1px solid transparent;transition:all .14s}
+.chip:hover{color:var(--text)}
+.chip.on{background:rgba(94,234,212,.13);color:var(--you);border-color:rgba(94,234,212,.35)}
+.chip.sw{width:26px;height:26px;padding:0;border-radius:50%}
+.chip.sw.on{box-shadow:0 0 0 2px var(--ink),0 0 0 4px var(--text)}
+.note{font-size:11.5px;color:var(--dimmer);line-height:1.5;margin:8px 0 0}
+input[type=range]{width:100%;height:4px;-webkit-appearance:none;appearance:none;
+  background:#2A3444;border-radius:3px;accent-color:var(--you)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+  border-radius:50%;background:var(--text);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;
+  background:var(--text);cursor:pointer}
+.toggle{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:7px 0}
+.toggle span{font-size:13px}
+.toggle small{display:block;color:var(--dimmer);font-size:11.5px;line-height:1.4;margin-top:1px}
+.sw-track{width:38px;height:22px;border-radius:12px;background:#2A3444;position:relative;
+  transition:background .16s;flex:none}
+.sw-track::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;
+  border-radius:50%;background:var(--text);transition:transform .16s}
+.sw-track[aria-pressed=true]{background:var(--you)}
+.sw-track[aria-pressed=true]::after{transform:translateX(16px);background:#06231F}
+.nudge{display:flex;align-items:center;gap:6px}
+.nudge button{width:28px;height:28px;border-radius:7px;background:var(--raise);
+  font-family:var(--mono);font-size:14px;color:var(--dim)}
+.nudge button:hover{color:var(--text)}
+.nudge output{flex:1;text-align:center;font-family:var(--mono);font-size:12px}
+
+/* ------------------------------------------------------------------ rail */
+.rail{background:var(--panel);border-left:1px solid var(--line);display:flex;
+  flex-direction:column;min-width:0;overflow:hidden}
+#app.rail-off .rail{border-left:0}
+.rail-top{padding:15px 16px 12px;border-bottom:1px solid var(--line)}
+.room-line{display:flex;align-items:center;gap:8px;margin:5px 0 12px}
+.room-line b{font-family:var(--mono);font-size:15px;letter-spacing:.04em;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.copy{margin-left:auto;font-size:11.5px;color:var(--dim);padding:5px 9px;border:1px solid var(--line);
+  border-radius:7px;transition:all .14s;flex:none}
+.copy:hover{color:var(--text);border-color:#2E3A4B}
+.copy.done{color:var(--you);border-color:rgba(94,234,212,.4)}
+.who{display:flex;flex-direction:column;gap:6px}
+.person{display:flex;align-items:center;gap:9px;font-size:13px}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.person .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.person .lvl{width:3px;height:3px;border-radius:50%;background:currentColor;flex:none;
+  opacity:0;transition:transform .1s,opacity .12s}
+.person.talking .lvl{opacity:1}
+.person.away .nm{color:var(--dimmer)}
+.tagline{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer);flex:none}
+
+.rail-tabs{display:flex;border-bottom:1px solid var(--line)}
+.rail-tab{flex:1;padding:11px;font-size:12px;color:var(--dim);border-bottom:2px solid transparent;
+  margin-bottom:-1px;transition:color .14s}
+.rail-tab:hover{color:var(--text)}
+.rail-tab.on{color:var(--text);border-bottom-color:var(--you)}
+.pane{flex:1;min-height:0;display:none;flex-direction:column;position:relative}
+.pane.on{display:flex}
+
+/* source picker */
+.src-box{padding:12px;border-bottom:1px solid var(--line-soft)}
+.src-box .eyebrow{display:block;margin-bottom:7px}
+.paste{display:flex;gap:6px}
+.paste input{flex:1;min-width:0;padding:9px 11px;border-radius:8px;background:var(--raise);
+  border:1px solid var(--line);font-size:13px}
+.paste input:focus{outline:none;border-color:var(--you)}
+.paste button{padding:0 13px;border-radius:8px;background:var(--you);color:#06231F;
+  font-size:12.5px;font-weight:700;flex:none}
+.hint{font-size:11.5px;color:var(--dimmer);margin:8px 0 0;line-height:1.5}
+.actions{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--line-soft)}
+.mini{flex:1;padding:8px;border-radius:7px;font-size:12px;color:var(--dim);background:var(--raise);
+  border:1px solid transparent;transition:all .14s}
+.mini:hover{color:var(--text);border-color:var(--line)}
+.mini.hero{background:rgba(94,234,212,.11);color:var(--you);border-color:rgba(94,234,212,.28)}
+.mini.hero:hover{background:rgba(94,234,212,.18)}
+
+.lib-list{flex:1;overflow-y:auto;overscroll-behavior:contain}
+.lib-list::-webkit-scrollbar,.msgs::-webkit-scrollbar{width:8px}
+.lib-list::-webkit-scrollbar-thumb,.msgs::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+.title-card{display:flex;gap:11px;padding:10px 14px;width:100%;text-align:left;
+  border-bottom:1px solid var(--line-soft);transition:background .14s}
+.title-card:hover,.title-card.on{background:var(--raise)}
+.thumb{width:56px;height:40px;flex:none;border-radius:6px;background:var(--raise);
+  object-fit:cover;border:1px solid var(--line)}
+.title-card .meta{min-width:0;display:flex;flex-direction:column;justify-content:center;gap:4px;flex:1}
+.title-card .nm{font-size:13.5px;font-weight:500;line-height:1.3}
+.title-card .sub{font-family:var(--mono);font-size:10.5px;color:var(--dimmer)}
+.sect{padding:11px 14px 5px;border-bottom:1px solid var(--line-soft);background:var(--panel);
+  position:sticky;top:0;z-index:1}
+.title-card .host{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dimmer);border:1px solid var(--line);
+  border-radius:4px;padding:1px 5px;align-self:flex-start}
+.title-card .kill{opacity:0;color:var(--dimmer);font-size:16px;padding:0 6px;align-self:center;flex:none}
+.title-card:hover .kill{opacity:1}
+.title-card .kill:hover{color:var(--warn)}
+.prog{display:block;height:2px;border-radius:2px;background:#2A3444;margin-top:5px;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--you)}
+
+.up{padding:9px 14px;border-bottom:1px solid var(--line-soft);font-size:12px}
+.up .nm{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px}
+.up .nm span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.up .nm span:last-child{font-family:var(--mono);font-size:10.5px;color:var(--dim);flex:none}
+.up .bar2{height:3px;border-radius:2px;background:#2A3444;overflow:hidden}
+.up .bar2 i{display:block;height:100%;background:var(--you);width:0;transition:width .25s}
+.up.bad .bar2 i{background:var(--warn)}
+.drop{position:absolute;inset:0;z-index:5;display:none;place-items:center;
+  background:rgba(10,13,19,.92);border:2px dashed var(--you);border-radius:10px;margin:6px;
+  color:var(--you);font-size:13px;text-align:center;padding:20px}
+.drop.on{display:grid}
+
+.msgs{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.msg{font-size:13.5px;line-height:1.45;word-break:break-word}
+.msg .from{font-size:11px;font-weight:500;display:block;margin-bottom:1px}
+.composer{padding:10px 12px;border-top:1px solid var(--line);display:flex;gap:8px}
+.composer input{flex:1;padding:9px 11px;border-radius:8px;background:var(--raise);border:1px solid var(--line)}
+.composer input:focus{outline:none;border-color:var(--you)}
+.hollow{padding:30px 20px;text-align:center;color:var(--dimmer);font-size:13px;line-height:1.6}
+
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);z-index:80;
+  padding:10px 16px;border-radius:9px;font-size:13px;background:var(--raise);
+  border:1px solid var(--line);box-shadow:0 14px 40px rgba(0,0,0,.55);
+  opacity:0;pointer-events:none;transition:all .22s;max-width:min(460px,90vw);text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+.ask{position:fixed;inset:0;z-index:90;display:none;place-items:center;padding:24px;background:rgba(4,6,10,.78)}
+.ask.on{display:grid}
+.ask-card{width:min(400px,100%);background:var(--panel);border:1px solid var(--line);
+  border-radius:14px;padding:22px}
+.ask-card h3{margin:0 0 6px;font-size:16px;font-weight:500}
+.ask-card p{margin:0 0 18px;font-size:13px;color:var(--dim);line-height:1.55}
+.ask-card .row{margin-top:16px}
+
+@media (max-width:860px){
+  #app{grid-template-columns:1fr;grid-template-rows:1fr auto}
+  .rail{border-left:0;border-top:1px solid var(--line);max-height:46dvh}
+  #app.rail-off{grid-template-rows:1fr 0}
+  .sheet{left:12px;right:12px;width:auto;bottom:88px}
+  .chrome{padding:44px 12px 12px}
+  .now{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+
+/* ------------------------------------------------------------- landing */
+#landing{display:none;height:100dvh;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;background:var(--bg);color:var(--text)}
+#landing.on{display:block}
+.landing-wrap{width:min(1040px,100%);margin:0 auto;padding:42px 22px 64px}
+.landing-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:34px}
+.landing-brand{display:flex;align-items:center;gap:11px}
+.landing-brand .mark{font-size:20px}
+.landing-hero h1{font-size:clamp(30px,5vw,54px);font-weight:500;letter-spacing:-.04em;margin:14px 0 8px}
+.landing-hero p{margin:0;color:var(--dim);max-width:650px;line-height:1.6}
+.landing-actions{display:flex;gap:8px;flex:none}
+.landing-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:18px}
+.landing-panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;overflow:hidden}
+.landing-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 18px;border-bottom:1px solid var(--line)}
+.landing-panel-head h2{font-size:15px;font-weight:500;margin:0}
+.landing-panel-head span{font-size:11px;color:var(--dimmer)}
+.library-form{padding:16px;border-bottom:1px solid var(--line)}
+.library-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.library-form .field{margin:0}
+.library-form .field.full{grid-column:1/-1}
+.library-form .row{margin-top:12px}
+.continue-card{margin:14px;padding:14px;border:1px solid rgba(94,234,212,.28);background:rgba(94,234,212,.06);border-radius:11px;display:flex;justify-content:space-between;align-items:center;gap:15px}
+.continue-card b{display:block;font-size:14px;margin:5px 0}
+.continue-card small{display:block;color:var(--dimmer);font-family:var(--mono);font-size:10px}
+.library-series{border-bottom:1px solid var(--line-soft)}
+.library-series:last-child{border-bottom:0}
+.library-series-head{display:flex;justify-content:space-between;align-items:center;padding:15px 17px 9px}
+.library-series-head h3{margin:0 0 4px;font-size:15px;font-weight:500}
+.library-series-head span{font-size:10px;color:var(--dimmer)}
+.library-delete-series,.episode-delete,.room-delete{color:var(--dimmer);font-size:11px;padding:5px 7px}
+.library-delete-series:hover,.episode-delete:hover,.room-delete:hover{color:var(--warn)}
+.library-episode{display:flex;align-items:center;gap:12px;padding:10px 17px 10px 29px;border-top:1px solid var(--line-soft)}
+.episode-meta{min-width:0;flex:1}
+.episode-meta b{display:block;font-size:13px;font-weight:450;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.episode-meta span{display:block;margin-top:3px;font-size:10px;color:var(--dimmer)}
+.episode-actions{display:flex;gap:5px;align-items:center}
+.episode-actions .btn{padding:7px 11px;font-size:11px}
+.landing-empty{padding:28px 18px;color:var(--dimmer);font-size:12px;line-height:1.55;text-align:center}
+.landing-empty b{display:block;color:var(--dim);font-weight:500;margin-bottom:5px}
+.saved-room-list{padding:0 14px 14px}
+.saved-room{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 3px;border-bottom:1px solid var(--line-soft)}
+.saved-room:last-child{border-bottom:0}
+.saved-room b{display:block;font-size:12px;font-weight:500}
+.saved-room .mono{display:block;font-size:10px;color:var(--you);margin-top:3px}
+.saved-room small{display:block;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dimmer);font-size:10px;margin-top:3px}
+.saved-room-actions{display:flex;gap:3px;flex:none}
+.saved-room-actions .btn{padding:7px 10px;font-size:11px}
+@media(max-width:760px){
+  .landing-wrap{padding:28px 14px 50px}
+  .landing-hero{display:block}
+  .landing-actions{margin-top:18px}
+  .landing-grid{grid-template-columns:1fr}
+  .library-form-grid{grid-template-columns:1fr}
+  .library-form .field.full{grid-column:auto}
+}
+
+
+.landing-ai-note{padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--raise);font-size:11px;line-height:1.45}
+.landing-ai-note b{display:block;color:var(--text);font-weight:500;margin-bottom:3px}
+.landing-ai-note span{color:var(--dim)}
+.library-series-meta{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:10px;color:var(--dimmer)}
+.library-year{font-size:11px;color:var(--dimmer);font-weight:400}
+.imdb-link{color:var(--warn);text-decoration:none;font-size:10px}
+.imdb-link:hover{text-decoration:underline}
+.library-genres{color:var(--dimmer)}
+.library-summary{margin:8px 0 2px;max-width:72ch;color:var(--dim);font-size:11px;line-height:1.5}
+.episode-summary{margin:5px 0 0;color:var(--dimmer);font-size:10.5px;line-height:1.45;max-width:75ch}
+</style>
+</head>
+<body>
+
+
+<div id="landing">
+  <div class="landing-wrap">
+    <header class="landing-hero">
+      <div>
+        <div class="landing-brand">
+          <div class="mark"><span class="mark-bars"><i></i><i></i></span><b>Parallel</b></div>
+        </div>
+        <h1>Your anime library.</h1>
+        <p>Keep your series, episode links, subtitles and watch-together rooms in one place. Pick an episode and jump straight back into its saved room.</p>
+      </div>
+      <div class="landing-actions">
+        <button class="btn ghost" id="landingJoinBtn">Join room</button>
+        <button class="btn primary" id="landingNewRoomBtn">New room</button>
+      </div>
+    </header>
+
+    <div class="landing-grid">
+      <section class="landing-panel">
+        <div class="landing-panel-head">
+          <div>
+            <h2>Library</h2>
+            <span>Series and episodes saved on this device</span>
+          </div>
+          <button class="btn ghost" id="landingAddBtn" style="padding:7px 11px;font-size:11px">+ Add episode</button>
+        </div>
+
+        <div class="library-form" id="libraryFormWrap" hidden>
+          <form id="libraryForm">
+            <div class="library-form-grid">
+              <label class="field">
+                <span class="eyebrow">Series name</span>
+                <input class="input" id="librarySeries" name="series" placeholder="Demon Slayer" maxlength="120" required>
+              </label>
+              <label class="field">
+                <span class="eyebrow">Episode</span>
+                <input class="input" name="episode" placeholder="S01E01 · Cruelty" maxlength="120">
+              </label>
+              <label class="field full">
+                <span class="eyebrow">Episode link</span>
+                <input class="input" name="url" placeholder="https://.../playlist.m3u8" autocapitalize="off" spellcheck="false" required>
+              </label>
+              <label class="field full">
+                <span class="eyebrow">English subtitle URL <small>(optional)</small></span>
+                <input class="input" name="subtitleUrl" placeholder="https://.../english.srt" autocapitalize="off" spellcheck="false">
+              </label>
+              <label class="field full">
+                <span class="eyebrow">Or upload subtitle file <small>(.srt, .vtt, .ass, .ssa · max 1.5 MB)</small></span>
+                <input class="input" name="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,text/vtt,application/x-subrip">
+              </label>
+              <div class="landing-ai-note full">
+                <b>Grok handles metadata only</b>
+                <span>It identifies the episode and finds IMDb details. Subtitles are supplied by you and the actual subtitle text is preserved with the episode.</span>
+              </div>
+            </div>
+            <div class="row">
+              <button class="btn ghost" id="libraryCancel" type="button">Cancel</button>
+              <button class="btn primary" type="submit">Analyze &amp; add</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="landingLibrary"></div>
+      </section>
+
+      <section class="landing-panel">
+        <div class="landing-panel-head">
+          <div>
+            <h2>Saved rooms</h2>
+            <span>Room codes are remembered on this device</span>
+          </div>
+        </div>
+        <div id="landingRooms"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div id="gate">
+  <div class="gate-card">
+    <div class="mark"><span class="mark-bars"><i></i><i></i></span><b>Parallel</b></div>
+    <p class="gate-lede">One video, two playheads, kept within a few frames of each other.</p>
+
+    <label class="field">
+      <span class="eyebrow">Your name</span>
+      <input id="who" class="input" placeholder="Who's watching?" maxlength="24" autocomplete="nickname">
+    </label>
+    <label class="field">
+      <span class="eyebrow">Room code</span>
+      <input id="code" class="input" placeholder="autumn-fig-4k2p" maxlength="40"
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+    </label>
+
+    <div class="row">
+      <button class="btn ghost" id="roll">New code</button>
+      <button class="btn primary" id="enter">Join room</button>
+    </div>
+
+    <p class="err" id="gateErr"></p>
+    <p class="gate-note">
+      The room code is the only thing keeping strangers out, so use a generated one.
+      Sync via <code id="dbLabel">Firebase</code>.
+    </p>
+  </div>
+</div>
+
+<div id="app">
+  <div class="stage" id="stage">
+    <div id="ytwrap"><div id="yt"></div></div>
+    <video id="v" playsinline></video>
+    <div class="shield" id="shield"></div>
+
+    <div class="empty" id="empty">
+      <span class="eyebrow">Nothing playing</span>
+      <p id="emptyMsg">Paste a YouTube link, or open a file from your computer.</p>
+    </div>
+
+    <div class="subs" id="subs"></div>
+
+    <div class="stall" id="stall">
+      <div><div class="spinner"></div><span class="eyebrow" id="stallWhy">Buffering</span></div>
+    </div>
+
+    <div class="resume" id="resume">
+      <span>Left off at <b id="resumeAt">0:00</b></span>
+      <button class="go" id="resumeGo">Resume</button>
+      <button class="no" id="resumeNo">Start over</button>
+    </div>
+
+    <div class="tap" id="tap">
+      <button class="btn primary" id="tapBtn">Tap to start playback</button>
+    </div>
+
+    <div class="chrome" id="chrome">
+      <div class="ribbon" id="ribbon">
+        <div class="ribbon-track"></div>
+        <div class="gap" id="gap"><span class="gap-label" id="gapLabel"></span></div>
+        <div class="converged" id="conv"></div>
+      </div>
+
+      <div class="scrub" id="scrub">
+        <div class="scrub-rail"></div>
+        <div class="scrub-buf" id="buf"></div>
+        <div class="scrub-fill" id="fill"></div>
+        <div class="scrub-knob" id="knob"></div>
+        <div class="scrub-tip" id="tip">0:00</div>
+      </div>
+
+      <div class="bar">
+        <button class="ico play" id="playBtn" title="Play / pause  (space)" aria-label="Play"></button>
+        <button class="ico" id="back10" title="Back 10s" aria-label="Back 10 seconds"></button>
+        <button class="ico" id="fwd10" title="Forward 10s" aria-label="Forward 10 seconds"></button>
+        <div class="vol">
+          <button class="ico" id="muteBtn" title="Mute  (m)" aria-label="Mute"></button>
+          <input type="range" id="volume" min="0" max="1" step=".01" value="1" aria-label="Volume">
+        </div>
+        <span class="time"><b id="tNow">0:00</b> / <span id="tEnd">0:00</span></span>
+        <span class="spacer"></span>
+        <span class="now" id="nowLabel"></span>
+        <button class="ico" id="micBtn" title="Voice chat" aria-label="Voice chat"></button>
+        <button class="pill" id="rateBtn" title="Playback speed">1×</button>
+        <button class="ico" id="ccBtn" title="Subtitles  (c)" aria-label="Subtitles" aria-pressed="true"></button>
+        <button class="ico" id="setBtn" title="Settings" aria-label="Settings" aria-pressed="false"></button>
+        <button class="ico" id="fsBtn" title="Fullscreen  (f)" aria-label="Fullscreen"></button>
+        <button class="ico" id="railBtn" title="Show / hide panel" aria-label="Toggle panel" aria-pressed="true"></button>
+      </div>
+    </div>
+
+    <div class="sheet" id="sheet">
+      <div class="tabs">
+        <button class="tab on" data-tab="play">Playback</button>
+        <button class="tab" data-tab="cc">Subtitles</button>
+        <button class="tab" data-tab="room">Room</button>
+      </div>
+
+      <div data-panel="play">
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Speed</span><span class="val" id="rateVal">1×</span></div>
+          <div class="chips" id="rates"></div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Quality</span></div>
+          <div class="chips" id="quals"></div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Sync</span><span class="val mono" id="driftVal">—</span></div>
+          <div class="toggle">
+            <span>Resync now<small>Jump straight to the room's position.</small></span>
+            <button class="btn ghost" id="resync" style="padding:7px 12px;font-size:12px;flex:none">Snap</button>
+          </div>
+          <p class="note" id="syncNote"></p>
+        </div>
+      </div>
+
+      <div data-panel="cc" hidden>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Track</span></div>
+          <div class="chips" id="tracks"></div>
+          <p class="note" id="ccNote"></p>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Timing</span><span class="val mono" id="delayVal">0.0s</span></div>
+          <div class="nudge">
+            <button id="delMinus" title="Earlier  ([)">−</button>
+            <output id="delOut" class="mono">in sync</output>
+            <button id="delPlus" title="Later  (])">+</button>
+          </div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Size</span><span class="val" id="sizeVal">100%</span></div>
+          <input type="range" id="size" min="1.7" max="6.4" step=".1" value="3.1">
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Text colour</span></div>
+          <div class="chips" id="colors"></div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Backdrop</span><span class="val" id="bgVal">62%</span></div>
+          <input type="range" id="bg" min="0" max="1" step=".02" value=".62">
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Typeface</span></div>
+          <div class="chips" id="fonts"></div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Edge</span></div>
+          <div class="chips" id="edges"></div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Height</span><span class="val" id="posVal">9%</span></div>
+          <input type="range" id="pos" min="2" max="42" step="1" value="9">
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Line width</span><span class="val" id="widVal">82%</span></div>
+          <input type="range" id="wid" min="40" max="98" step="1" value="82">
+        </div>
+      </div>
+
+      <div data-panel="room" hidden>
+        <div class="set">
+          <div class="toggle">
+            <span>Host controls only<small>Others can watch but not touch playback.</small></span>
+            <button class="sw-track" id="lock" aria-pressed="false" aria-label="Host controls only"></button>
+          </div>
+          <div class="toggle">
+            <span>Wait for slow buffers<small>Pause everyone when one person stalls.</small></span>
+            <button class="sw-track" id="pob" aria-pressed="true" aria-label="Wait for slow buffers"></button>
+          </div>
+          <div class="toggle">
+            <span>Duck when someone talks<small>Drops the volume while a voice comes through.</small></span>
+            <button class="sw-track" id="duck" aria-pressed="true" aria-label="Duck audio during voice chat"></button>
+          </div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Host</span></div>
+          <div class="chips" id="hosts"></div>
+        </div>
+        <div class="set">
+          <div class="set-head"><span class="eyebrow">Connection</span></div>
+          <p class="note mono" id="netVal">connecting…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="rail" id="rail">
+    <div class="rail-top">
+      <span class="eyebrow">Room</span>
+      <div class="room-line">
+        <b id="roomName">—</b>
+        <button class="copy" id="homeBtn">Library</button>
+        <button class="copy" id="copyBtn">Copy link</button>
+      </div>
+      <div class="who" id="whoList"></div>
+    </div>
+
+    <div class="rail-tabs">
+      <button class="rail-tab on" data-pane="src">Source</button>
+      <button class="rail-tab" data-pane="chat">Chat</button>
+    </div>
+
+    <div class="pane on" data-pane="src" id="srcPane">
+      <div class="src-box">
+        <span class="eyebrow">Paste a link</span>
+        <div class="paste">
+          <input id="urlIn" placeholder="youtube.com/watch?v=… or a direct .mp4" autocapitalize="off" spellcheck="false">
+          <button id="urlGo">Play</button>
+        </div>
+        <p class="hint">YouTube links, any direct video URL, or an HLS .m3u8 stream — all need to allow cross-origin requests.</p>
+      </div>
+
+      <div class="actions">
+        <button class="mini hero" id="localBtn">Open a local file</button>
+        <button class="mini" id="saveBtn" hidden>Save to shelf</button>
+        <button class="mini" id="addBtn" hidden>Upload</button>
+      </div>
+
+      <div id="uploads"></div>
+      <div class="lib-list" id="lists">
+        <div class="sect" id="shelfSect" hidden><span class="eyebrow">Shelf</span></div>
+        <div id="shelfList"></div>
+        <div class="sect" id="libSect" hidden><span class="eyebrow">Bucket</span></div>
+        <div id="libList"></div>
+        <div class="hollow" id="listEmpty">
+          Nothing saved yet.<br><br>
+          Paste a link and press <b>Save to shelf</b> and it stays here for both
+          of you, whatever it's hosted on.
+        </div>
+      </div>
+      <div class="drop" id="drop"><span>Drop a video, or an .srt to use as subtitles</span></div>
+    </div>
+
+    <div class="pane" data-pane="chat">
+      <div class="msgs" id="msgs"></div>
+      <div class="composer"><input id="chatIn" placeholder="Say something" maxlength="400"></div>
+    </div>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="ask" id="ask">
+  <div class="ask-card">
+    <h3 id="askTitle"></h3>
+    <p id="askBody"></p>
+    <input class="input" id="askIn">
+    <div class="row">
+      <button class="btn ghost" id="askNo">Cancel</button>
+      <button class="btn primary" id="askYes">OK</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="filePick" accept="video/*,.mkv,.mp4,.webm,.mov" hidden>
+<input type="file" id="upPick" accept="video/*,.mkv,.mp4,.webm,.mov,.srt,.vtt,.ass,.ssa,image/*" multiple hidden>
+<div id="voices" hidden></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
