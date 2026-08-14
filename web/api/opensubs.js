@@ -180,6 +180,30 @@ async function downloadFile(session, candidate) {
   throw last || new Error("Subtitle download failed.");
 }
 
+function parseEpisodeSelector(value) {
+  // Accepts an array of numbers (e.g. [1,2,5]) or a range string like
+  // "1-5,8,10". Returns null (meaning "no filter, take everything") when
+  // nothing usable was supplied, or a Set of episode numbers to keep.
+  if (Array.isArray(value)) {
+    const nums = value.map(Number).filter((n) => Number.isInteger(n) && n >= 1);
+    return nums.length ? new Set(nums) : null;
+  }
+  const str = String(value || "").trim();
+  if (!str) return null;
+  const out = new Set();
+  for (const part of str.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const range = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (range) {
+      let [a, b] = [Number(range[1]), Number(range[2])];
+      if (a > b) [a, b] = [b, a];
+      for (let n = a; n <= b && n - a < 200; n++) out.add(n); // guard against absurd ranges
+    } else if (/^\d+$/.test(part)) {
+      out.add(Number(part));
+    }
+  }
+  return out.size ? out : null;
+}
+
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -215,6 +239,10 @@ export default async function handler(req, res) {
     const requestedSeason = Number(req.body?.seasonNumber);
     const seasons = Number.isInteger(requestedSeason) && requestedSeason >= 1 && requestedSeason <= MAX_SEASONS
       ? [requestedSeason] : Array.from({ length: MAX_SEASONS }, (_, i) => i + 1);
+    // Optional episode filter (e.g. { episodeNumbers: "1-5,8,10" } or
+    // { episodeNumbers: [1,2,5] }) so a 20+ episode season doesn't force an
+    // all-or-nothing download.
+    const episodeFilter = parseEpisodeSelector(req.body?.episodeNumbers ?? req.body?.episodeNumber);
 
     for (const season of seasons) {
       const body = await searchSeason(session, imdbId, season);
@@ -223,6 +251,7 @@ export default async function handler(req, res) {
         const feature = a.feature_details || {};
         const ep = detectEpisode(a.release || a.feature_details?.movie_name, feature);
         if (ep.season == null || ep.episode == null) continue;
+        if (episodeFilter && !episodeFilter.has(ep.episode)) continue;
         for (const f of (a.files || [])) {
           if (!f?.file_id) continue;
           const key = `${ep.season}x${ep.episode}`;
@@ -237,7 +266,13 @@ export default async function handler(req, res) {
       if (candidates.size >= MAX_RESULTS) break;
     }
 
-    if (!candidates.size) return res.status(404).json({ error: "OpenSubtitles API returned no English episode subtitles for this IMDb ID." });
+    if (!candidates.size) {
+      return res.status(404).json({
+        error: episodeFilter
+          ? `OpenSubtitles API returned no English subtitles for episode(s) ${[...episodeFilter].sort((a,b)=>a-b).join(", ")}.`
+          : "OpenSubtitles API returned no English episode subtitles for this IMDb ID.",
+      });
+    }
 
     const chosen = [...candidates.values()].slice(0, MAX_DOWNLOADS);
     const results = await mapLimit(chosen, CONCURRENCY, async (candidate) => {
