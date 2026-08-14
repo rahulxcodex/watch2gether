@@ -315,10 +315,29 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 .msgs{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
 .msg{font-size:13.5px;line-height:1.45;word-break:break-word}
 .msg .from{font-size:11px;font-weight:500;display:block;margin-bottom:1px}
+.msg.sys{align-self:center;font-size:11.5px;color:var(--dimmer);font-style:italic;text-align:center}
+.msg.reaction{display:flex;align-items:baseline;gap:6px}
+.msg.reaction .rx-emoji{font-size:17px;line-height:1}
+.chat-head{padding:10px 14px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:2px}
+.chat-head b{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reactBar{display:flex;gap:5px;padding:6px 12px 0}
+.reactBar .rx{flex:1;padding:6px 0;border-radius:7px;background:var(--raise);border:1px solid transparent;
+  font-size:17px;line-height:1;transition:all .12s}
+.reactBar .rx:hover{border-color:var(--line);transform:translateY(-1px)}
+.reactBar .rx:active{transform:translateY(0) scale(.92)}
 .composer{padding:10px 12px;border-top:1px solid var(--line);display:flex;gap:8px}
 .composer input{flex:1;padding:9px 11px;border-radius:8px;background:var(--raise);border:1px solid var(--line)}
 .composer input:focus{outline:none;border-color:var(--you)}
 .hollow{padding:30px 20px;text-align:center;color:var(--dimmer);font-size:13px;line-height:1.6}
+
+.reactions{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:6}
+.rx-float{position:absolute;bottom:18%;font-size:30px;line-height:1;
+  animation:rxRise 2.1s ease-out forwards;will-change:transform,opacity}
+@keyframes rxRise{
+  0%{transform:translateY(0) scale(.6);opacity:0}
+  12%{transform:translateY(-14px) scale(1.05);opacity:1}
+  100%{transform:translateY(-220px) scale(1);opacity:0}
+}
 
 .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);z-index:80;
   padding:10px 16px;border-radius:9px;font-size:13px;background:var(--raise);
@@ -720,6 +739,7 @@ html,body{max-width:100%;overflow-x:hidden;}
     </div>
 
     <div class="subs" id="subs"></div>
+    <div class="reactions" id="reactions"></div>
 
     <div class="stall" id="stall">
       <div><div class="spinner"></div><span class="eyebrow" id="stallWhy">Buffering</span></div>
@@ -918,7 +938,15 @@ html,body{max-width:100%;overflow-x:hidden;}
     </div>
 
     <div class="pane" data-pane="chat">
+      <div class="chat-head"><span class="eyebrow">Watching</span><b id="chatTitle">Nothing yet</b></div>
       <div class="msgs" id="msgs"></div>
+      <div class="reactBar" id="reactBar">
+        <button class="rx" data-e="😂" aria-label="React laughing">😂</button>
+        <button class="rx" data-e="❤️" aria-label="React heart">❤️</button>
+        <button class="rx" data-e="👍" aria-label="React thumbs up">👍</button>
+        <button class="rx" data-e="🔥" aria-label="React fire">🔥</button>
+        <button class="rx" data-e="😱" aria-label="React shocked">😱</button>
+      </div>
       <div class="composer"><input id="chatIn" placeholder="Say something" maxlength="400"></div>
     </div>
   </aside>
