@@ -1,11 +1,11 @@
 /**
- * Gemini-powered anime library metadata (free tier).
+ * Groq-powered anime library metadata (free tier).
  *
  * POST /api/identify
  * Body: { series: string, url: string }
  *
- * Gemini handles metadata/web research only. Subtitle files are supplied by
- * the user through the library UI and are never searched for by Gemini.
+ * Groq handles metadata/web research only. Subtitle files are supplied by
+ * the user through the library UI and are never searched for by Groq.
  */
 export const config = { runtime: "nodejs" };
 
@@ -26,11 +26,7 @@ function badUrl(value) {
 }
 
 function extractText(response) {
-  const parts = response?.candidates?.[0]?.content?.parts || [];
-  for (const part of parts) {
-    if (typeof part.text === "string" && part.text) return part.text;
-  }
-  return "";
+  return response?.choices?.[0]?.message?.content || "";
 }
 
 export default async function handler(req, res) {
@@ -42,10 +38,10 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return res.status(500).json({
-      error: "GEMINI_API_KEY is not configured in Vercel environment variables."
+      error: "GROQ_API_KEY is not configured in Vercel environment variables."
     });
   }
 
@@ -69,28 +65,27 @@ export default async function handler(req, res) {
     if (r.ok) playlistHint = (await r.text()).slice(0, 12000);
   } catch {}
 
-  // Gemini's structured-output schema is OpenAPI-style: nullable fields use
-  // `nullable: true` alongside a single `type` rather than a type array.
+  // JSON Schema for Groq's OpenAI-compatible strict structured-output mode.
   const schema = {
     type: "object",
     properties: {
       series: { type: "string" },
-      seasonNumber: { type: "integer", nullable: true },
-      episodeNumber: { type: "integer", nullable: true },
+      seasonNumber: { type: ["integer", "null"] },
+      episodeNumber: { type: ["integer", "null"] },
       episodeCode: { type: "string" },
       episodeTitle: { type: "string" },
       confidence: { type: "string", enum: ["high", "medium", "low"] },
 
-      seriesYear: { type: "integer", nullable: true },
-      seriesImdbId: { type: "string", nullable: true },
-      seriesImdbUrl: { type: "string", nullable: true },
-      seriesImdbRating: { type: "number", nullable: true },
+      seriesYear: { type: ["integer", "null"] },
+      seriesImdbId: { type: ["string", "null"] },
+      seriesImdbUrl: { type: ["string", "null"] },
+      seriesImdbRating: { type: ["number", "null"] },
       seriesGenres: { type: "array", items: { type: "string" } },
       seriesSummary: { type: "string" },
 
-      episodeImdbId: { type: "string", nullable: true },
-      episodeImdbUrl: { type: "string", nullable: true },
-      episodeImdbRating: { type: "number", nullable: true },
+      episodeImdbId: { type: ["string", "null"] },
+      episodeImdbUrl: { type: ["string", "null"] },
+      episodeImdbRating: { type: ["number", "null"] },
       episodeSummary: { type: "string" },
 
       metadataNotes: { type: "string" }
@@ -100,7 +95,8 @@ export default async function handler(req, res) {
       "seriesYear","seriesImdbId","seriesImdbUrl","seriesImdbRating","seriesGenres",
       "seriesSummary","episodeImdbId","episodeImdbUrl","episodeImdbRating",
       "episodeSummary","metadataNotes"
-    ]
+    ],
+    additionalProperties: false
   };
 
   const prompt = `You are the metadata agent for a personal anime watch library.
@@ -135,80 +131,87 @@ unavailable and set confidence to low when evidence is weak.
 Playlist text (may be empty):
 ${playlistHint}`;
 
-  // Gemini can't combine the google_search grounding tool with a strict
-  // responseSchema in a single call, so this runs in two small steps:
-  // 1) a grounded research pass (free-form text, web search enabled), then
-  // 2) a structuring pass that turns that research into the strict JSON
-  //    shape the UI expects (no tools, so responseSchema is honored).
-  const model = "gemini-3.1-flash-lite";
-  const base = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  // groq/compound has built-in web search but doesn't support strict JSON
+  // schema output, and the structured-output models don't have web search.
+  // So this runs in two small free-tier calls:
+  // 1) groq/compound does the grounded research as free-form text, then
+  // 2) openai/gpt-oss-120b turns that research into the strict JSON shape
+  //    the UI expects.
+  const base = "https://api.groq.com/openai/v1/chat/completions";
+  const headers = {
+    "content-type": "application/json",
+    authorization: `Bearer ${apiKey}`,
+  };
 
   let research;
   try {
-    const r = await fetch(`${base}?key=${encodeURIComponent(apiKey)}`, {
+    const r = await fetch(base, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
+        model: "groq/compound",
+        messages: [{ role: "user", content: prompt }],
       }),
     });
     const raw = await r.text();
     if (!r.ok) {
       return res.status(502).json({
-        error: `Gemini returned HTTP ${r.status}`,
+        error: `Groq returned HTTP ${r.status}`,
         detail: raw.slice(0, 1200),
       });
     }
     let parsed;
     try { parsed = JSON.parse(raw); }
-    catch { return res.status(502).json({ error: "Gemini returned invalid JSON." }); }
+    catch { return res.status(502).json({ error: "Groq returned invalid JSON." }); }
     research = extractText(parsed);
   } catch (e) {
-    return res.status(502).json({ error: `Gemini request failed: ${e?.message || e}` });
+    return res.status(502).json({ error: `Groq request failed: ${e?.message || e}` });
   }
-  if (!research) return res.status(502).json({ error: "Gemini returned no research result." });
+  if (!research) return res.status(502).json({ error: "Groq returned no research result." });
 
   let upstream;
   try {
-    upstream = await fetch(`${base}?key=${encodeURIComponent(apiKey)}`, {
+    upstream = await fetch(base, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({
-        contents: [{
+        model: "openai/gpt-oss-120b",
+        messages: [{
           role: "user",
-          parts: [{
-            text: `Convert the following research notes into the required structured fields. Use null where information is not confidently known.\n\nResearch notes:\n${research}`
-          }],
+          content: `Convert the following research notes into the required structured fields. Use null where information is not confidently known.\n\nResearch notes:\n${research}`
         }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: schema,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "anime_library_metadata",
+            schema,
+            strict: true,
+          },
         },
       }),
     });
   } catch (e) {
-    return res.status(502).json({ error: `Gemini request failed: ${e?.message || e}` });
+    return res.status(502).json({ error: `Groq request failed: ${e?.message || e}` });
   }
 
   const raw = await upstream.text();
   if (!upstream.ok) {
     return res.status(502).json({
-      error: `Gemini returned HTTP ${upstream.status}`,
+      error: `Groq returned HTTP ${upstream.status}`,
       detail: raw.slice(0, 1200),
     });
   }
 
   let response;
   try { response = JSON.parse(raw); }
-  catch { return res.status(502).json({ error: "Gemini returned invalid JSON." }); }
+  catch { return res.status(502).json({ error: "Groq returned invalid JSON." }); }
 
   const text = extractText(response);
-  if (!text) return res.status(502).json({ error: "Gemini returned no structured result." });
+  if (!text) return res.status(502).json({ error: "Groq returned no structured result." });
 
   let data;
   try { data = JSON.parse(text); }
-  catch { return res.status(502).json({ error: "Gemini returned non-JSON metadata." }); }
+  catch { return res.status(502).json({ error: "Groq returned non-JSON metadata." }); }
 
   for (const key of ["seriesImdbUrl", "episodeImdbUrl"]) {
     if (data[key] && badUrl(data[key])) data[key] = null;
