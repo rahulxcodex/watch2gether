@@ -1745,6 +1745,77 @@ function setupNetflixRows() {
   });
 }
 
+/* Continue-watching / saved-room cards used to be bare text — no artwork at
+ * all — because a saved room only stores a code/title/ref, not a library
+ * link. Rooms whose title matches (or is prefixed by) a library title we
+ * already have cached art for now get that poster as a backdrop; anything
+ * else still gets a proper gradient tile with a play glyph instead of a
+ * blank strip. */
+function findLibraryArtForRoomTitle(title) {
+  const raw = String(title || "").split(" — ")[0].trim();
+  if (!raw) return "";
+  const key = normalizeTitleKey(raw);
+  const match = MY_LIBRARY.find((s) => normalizeTitleKey(s.name) === key)
+    || MY_LIBRARY.find((s) => key && normalizeTitleKey(s.name).includes(key));
+  if (!match) return "";
+  const art = tmdbArt(match);
+  return backdropUrl(art, "w780") || posterUrl(art, "w342") || "";
+}
+
+function renderRoomCard(room, actionLabel) {
+  const card = document.createElement("div");
+  card.className = "netflix-room";
+  const art = findLibraryArtForRoomTitle(room.title || room.episodeTitle);
+  card.innerHTML = `
+    <div class="netflix-room-art"${art ? ` style="background-image:url('${esc(art)}')"` : ""}>${art ? "" : ""}<span class="room-play">▶</span></div>
+    <div class="netflix-room-body">
+      <b>${esc(room.title || "Saved room")}</b><span class="mono">${esc(room.code)}</span><small>${esc(room.episodeTitle || room.ref || "Ready to resume")}</small>
+      <div class="netflix-room-actions"><button class="btn primary" type="button">${esc(actionLabel)}</button><button class="btn ghost" type="button">Forget</button></div>
+    </div>`;
+  card.querySelector(".btn.primary").onclick = () => openRoom(room.code);
+  card.querySelector(".btn.ghost").onclick = () => removeSavedRoom(room.code);
+  return card;
+}
+
+/* The hero used to always show the single most-recently-added title with no
+ * way to see anything else without scrolling all the way down. This turns
+ * it into a small rotating "featured" strip — up to 5 recent titles you can
+ * click through, plus a slow auto-rotate so the homepage doesn't feel static. */
+let heroRotateTimer = null;
+function renderHeroPicker(ordered, active) {
+  const wrap = $("#libraryHeroPicker");
+  if (!wrap) return;
+  const picks = ordered.slice(0, 5);
+  clearTimeout(heroRotateTimer);
+  if (picks.length < 2) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  wrap.innerHTML = "";
+  for (const item of picks) {
+    const art = tmdbArt(item);
+    const thumb = posterUrl(art, "w185") || backdropUrl(art, "w300");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hero-pick" + (item.id === active.id ? " active" : "");
+    btn.title = item.name || "";
+    if (thumb) btn.style.backgroundImage = `url('${thumb}')`;
+    else btn.innerHTML = `<span class="hero-pick-fallback">${esc((item.name || "").slice(0, 22))}</span>`;
+    btn.onclick = () => {
+      activeLibraryTitle = item;
+      renderLanding();
+    };
+    wrap.appendChild(btn);
+  }
+  // Auto-advance every 8s, but only while the hero is actually on screen and
+  // the tab is visible, and stop the moment someone picks one manually by
+  // just letting the next renderLanding() clear this timer again.
+  heroRotateTimer = setTimeout(() => {
+    if (document.hidden) return;
+    const idx = picks.findIndex((x) => x.id === active.id);
+    activeLibraryTitle = picks[(idx + 1) % picks.length];
+    renderLanding();
+  }, 8000);
+}
+
 function renderLanding() {
   const allRow = $("#allRow");
   const moviesRow = $("#moviesRow");
@@ -1807,12 +1878,14 @@ function renderLanding() {
     if (!art) {
       fetchTmdbArt(h).then((fresh) => { if (fresh) renderLanding(); });
     }
+    renderHeroPicker(ordered, h);
   } else {
     activeLibraryTitle = null;
     heroTitle.textContent = "Your library";
     heroSummary.textContent = "Add a movie or series to build your personal library.";
     heroMeta.innerHTML = "";
     heroBackdrop.style.backgroundImage = "";
+    $("#libraryHeroPicker").hidden = true;
     const emptyHeroPoster = $(".netflix-hero-poster-wrap");
     if (emptyHeroPoster) emptyHeroPoster.classList.add("is-empty");
     $("#libraryHeroWatch").disabled = true;
@@ -1824,27 +1897,13 @@ function renderLanding() {
   continueRow.innerHTML = "";
   if (SAVED_ROOMS.length) {
     continueSection.hidden = false;
-    for (const room of SAVED_ROOMS.slice(0, 10)) {
-      const card = document.createElement("div");
-      card.className = "netflix-room";
-      card.innerHTML = `<b>${esc(room.title || "Saved room")}</b><span class="mono">${esc(room.code)}</span><small>${esc(room.episodeTitle || room.ref || "Ready to resume")}</small><div class="netflix-room-actions"><button class="btn primary" type="button">Resume</button><button class="btn ghost" type="button">Forget</button></div>`;
-      card.querySelector(".btn.primary").onclick = () => openRoom(room.code);
-      card.querySelector(".btn.ghost").onclick = () => removeSavedRoom(room.code);
-      continueRow.appendChild(card);
-    }
+    for (const room of SAVED_ROOMS.slice(0, 10)) continueRow.appendChild(renderRoomCard(room, "Resume"));
   } else continueSection.hidden = true;
 
   const rooms = $("#landingRooms");
   rooms.innerHTML = "";
   if (SAVED_ROOMS.length) {
-    for (const room of SAVED_ROOMS.slice(0, 12)) {
-      const card = document.createElement("div");
-      card.className = "netflix-room";
-      card.innerHTML = `<b>${esc(room.title || "Untitled room")}</b><span class="mono">${esc(room.code)}</span><small>${esc(room.episodeTitle || room.ref || "No saved media")}</small><div class="netflix-room-actions"><button class="btn primary" type="button">Open</button><button class="btn ghost" type="button">×</button></div>`;
-      card.querySelector(".btn.primary").onclick = () => openRoom(room.code);
-      card.querySelector(".btn.ghost").onclick = () => removeSavedRoom(room.code);
-      rooms.appendChild(card);
-    }
+    for (const room of SAVED_ROOMS.slice(0, 12)) rooms.appendChild(renderRoomCard(room, "Open"));
   } else {
     rooms.innerHTML = `<div class="netflix-empty" style="width:100%"><span>No saved rooms yet. Joining a room saves its code automatically on this device.</span></div>`;
   }
@@ -1909,9 +1968,11 @@ function syncSeriesFields() {
     field.hidden = true;
     input.required = false;
     input.value = sel.value;
-    const imdb = findSeries(sel.value)?.imdbId || "";
+    const chosen = findSeries(sel.value);
+    const imdb = chosen?.imdbId || "";
     const imdbField = $("#libraryForm")?.querySelector('[name="imdbId"]');
     if (imdbField && imdb) imdbField.value = imdb;
+    updateFormPreview(chosen, null);
   } else {
     field.hidden = false;
     input.required = true;
@@ -1920,23 +1981,57 @@ function syncSeriesFields() {
   }
 }
 
-function openLibraryForm(seriesName) {
-  populateSeriesSelect(seriesName);
+// `catalogueHit` is an optional prefill coming from Browse — a search result
+// the user just chose to add, carrying a title/imdbId/mediaType/poster that
+// wouldn't otherwise exist yet as a library entry. It only fills fields in;
+// it never bypasses findSeries's "already in your library" matching.
+function openLibraryForm(seriesName, catalogueHit) {
+  const nameForSelect = seriesName || catalogueHit?.title || "";
+  populateSeriesSelect(nameForSelect);
   $("#libraryFormOverlay").hidden = false;
   $("#libraryFormWrap").hidden = false;
   // When opened from a specific series' "+ Add episode" button, that series
   // is already picked and its name field is hidden — so send focus straight
   // to the episode link instead of a hidden input.
-  const chosenSeries = seriesName ? findSeries(seriesName) : null;
+  const chosenSeries = nameForSelect ? findSeries(nameForSelect) : null;
   const imdbField = $("#libraryForm").querySelector('[name="imdbId"]');
-  if (imdbField) { imdbField.value = chosenSeries?.imdbId || ""; }
+  if (imdbField) { imdbField.value = chosenSeries?.imdbId || catalogueHit?.imdbId || ""; }
   const mediaType = $("#libraryMediaType");
-  if (mediaType) { mediaType.value = chosenSeries ? (mediaTypeOf(chosenSeries) === "movie" ? "movie" : "series") : "series"; mediaType.disabled = !!chosenSeries; }
+  if (mediaType) {
+    mediaType.value = chosenSeries
+      ? (mediaTypeOf(chosenSeries) === "movie" ? "movie" : "series")
+      : (catalogueHit?.mediaType === "movie" ? "movie" : "series");
+    mediaType.disabled = !!chosenSeries;
+  }
   syncMovieFields();
+  if (catalogueHit && !chosenSeries) {
+    const seriesInput = $("#librarySeries");
+    if (seriesInput) seriesInput.value = catalogueHit.title || "";
+  }
+  updateFormPreview(chosenSeries, catalogueHit);
   const target = chosenSeries
     ? $("#libraryForm").querySelector('[name="url"]')
-    : $("#librarySeries");
+    : (catalogueHit ? $("#libraryForm").querySelector('[name="seasonNumber"],[name="url"]') : $("#librarySeries"));
   target?.focus();
+}
+
+// Fills the little preview pane on the left of the Add-title modal so it
+// stops feeling like a bare form — shows the poster + a short caption for
+// whichever title is about to be added/extended.
+function updateFormPreview(chosenSeries, catalogueHit) {
+  const art = $("#formPreviewArt");
+  const caption = $("#formPreviewCaption");
+  if (!art || !caption) return;
+  const poster = chosenSeries ? posterUrl(tmdbArt(chosenSeries), "w300") : (catalogueHit?.poster || "");
+  const name = chosenSeries?.name || catalogueHit?.title || "";
+  art.style.backgroundImage = poster ? `url('${poster}')` : "none";
+  if (chosenSeries) {
+    caption.textContent = `Adding another episode to “${name}”.`;
+  } else if (catalogueHit) {
+    caption.textContent = `Adding “${name}” from Browse. You can paste the video link now or come back and add it later.`;
+  } else {
+    caption.textContent = "Pick a title from Browse, or type a name below and the poster fills in automatically.";
+  }
 }
 
 /* Series-name -> IMDb ID autocomplete. Hits /api/imdb-search (a thin proxy
@@ -2002,6 +2097,10 @@ function openLibraryForm(seriesName) {
     input.value = it.title;
     lastPickedName = it.title;
     hideBox();
+    const art = $("#formPreviewArt");
+    const caption = $("#formPreviewCaption");
+    if (art) art.style.backgroundImage = it.poster ? `url('${it.poster}')` : "none";
+    if (caption) caption.textContent = `Adding “${it.title}”. You can paste the video link now or add it later.`;
 
     if (it.provider === "imdb" && it.id) {
       // IMDb suggest results already carry the id — nothing else to fetch.
@@ -2099,25 +2198,24 @@ function scrollLandingTo(selector) {
   const top = Math.max(0, target.getBoundingClientRect().top + window.scrollY - 76);
   window.scrollTo({ top, behavior: "smooth" });
 }
-$("#navHome")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  if (!$("#landing")?.classList.contains("on")) { showLanding(); }
-  window.scrollTo({ top: 0, behavior: "smooth" });
-});
-$("#navMovies")?.addEventListener("click", (e) => { e.preventDefault(); scrollLandingTo("#moviesSection"); });
-$("#navSeries")?.addEventListener("click", (e) => { e.preventDefault(); scrollLandingTo("#seriesSection"); });
-$("#navRooms")?.addEventListener("click", (e) => { e.preventDefault(); scrollLandingTo("#roomsSection"); });
-
-// Event delegation keeps cards and navigation clickable even after re-renders.
+// Event delegation only (a single listener) — nav buttons used to have both
+// a direct listener AND this delegated one, so every click fired twice
+// (double-scroll / jumpy nav). Home and Movies now also go to genuinely
+// different places: Home always resets to the top of the landing page,
+// Movies jumps straight to the Movies row.
 document.addEventListener("click", (e) => {
-  const nav = e.target.closest?.("#navHome,#navMovies,#navSeries,#navRooms");
+  const nav = e.target.closest?.("#navHome,#navMovies,#navSeries,#navRooms,#navBrowse");
   if (nav) {
     e.preventDefault();
     e.stopPropagation();
-    if (nav.id === "navHome") { window.scrollTo({ top: 0, behavior: "smooth" }); }
+    if (nav.id === "navHome") {
+      if (!$("#landing")?.classList.contains("on")) showLanding();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
     else if (nav.id === "navMovies") scrollLandingTo("#moviesSection");
     else if (nav.id === "navSeries") scrollLandingTo("#seriesSection");
     else if (nav.id === "navRooms") scrollLandingTo("#roomsSection");
+    else if (nav.id === "navBrowse") openCatalogue();
     return;
   }
   const card = e.target.closest?.(".netflix-card");
@@ -2188,6 +2286,60 @@ $("#libraryForm").addEventListener("submit", (e) => {
   e.preventDefault();
   addLibraryEpisode(e.currentTarget);
 });
+// "Save title, add link later" — for titles added from Browse (or typed in
+// fresh) where the video isn't ready yet. Skips the whole identify/subtitle
+// pipeline (which all assumes a real episode URL) and just creates the bare
+// series/movie shell so it shows up in the library; a video link can be
+// attached afterwards from that title's own page ("+ Add episode"/"Add link").
+async function saveTitleOnly(form) {
+  const fd = new FormData(form);
+  const seriesName = String(fd.get("series") || "").trim();
+  const imdbId = String(fd.get("imdbId") || "").trim().toLowerCase();
+  const isMovie = String(fd.get("mediaType") || "series") === "movie";
+
+  if (!seriesName) return say(isMovie ? "Enter a movie name." : "Enter a series name.");
+  if (!/^tt\d{7,10}$/i.test(imdbId)) return say("Enter a valid IMDb ID such as tt1234567.");
+
+  let series = MY_LIBRARY.find((x) => x.imdbId && x.imdbId.toLowerCase() === imdbId) || findSeries(seriesName);
+  if (series) {
+    // Already in the library — nothing new to create, just take them to it
+    // so they can add an episode/link from there.
+    $("#libraryFormOverlay").hidden = true;
+    $("#libraryFormWrap").hidden = true;
+    $("#libraryForm").reset();
+    openLibraryDetail(series);
+    return;
+  }
+
+  series = {
+    id: makeId("series"),
+    name: seriesName.slice(0, 120),
+    mediaType: isMovie ? "movie" : "series",
+    episodes: [],
+    imdbId,
+    imdbUrl: `https://www.imdb.com/title/${imdbId}/`,
+    year: null,
+    imdbRating: null,
+    genres: [],
+    summary: "",
+    addedAt: Date.now(),
+  };
+  MY_LIBRARY.push(series);
+  writeLibrary();
+
+  $("#libraryFormOverlay").hidden = true;
+  $("#libraryFormWrap").hidden = true;
+  $("#libraryForm").reset();
+  const mt = $("#libraryMediaType"); if (mt) { mt.disabled = false; }
+  populateSeriesSelect();
+
+  // Art isn't fetched yet — hydrate it now so the title doesn't sit with a
+  // blank poster until the next full library refresh.
+  fetchTmdbArt(series).then((fresh) => { if (fresh) renderLanding(); });
+  say(`Added "${series.name}" to your library. Add its video link any time from the title's page.`);
+  openLibraryDetail(series);
+}
+$("#libraryTitleOnly")?.addEventListener("click", () => saveTitleOnly($("#libraryForm")));
 $("#libraryCancel").onclick = () => {
   $("#libraryFormOverlay").hidden = true;
   $("#libraryFormWrap").hidden = true;
@@ -4680,3 +4832,140 @@ addEventListener("beforeunload", () => {
   if (LOCAL.url) URL.revokeObjectURL(LOCAL.url);
   if (R.refs.me) remove(R.refs.me);
 });
+
+/* ============================================================ catalogue ===
+ * Browse: a live, independent search across TMDB/OMDB (via the existing
+ * /api/imdb-search proxy, which already merges TMDB with an IMDb/anime
+ * fallback) so movies, series and anime can be found and added to the
+ * library without already knowing the exact title or IMDb id. Adding a
+ * result just creates the title shell (poster, year, summary, IMDb id) —
+ * a video link can be attached immediately via the form that opens next,
+ * or skipped and added later from the title's own page.
+ */
+(function setupCatalogue() {
+  const overlay = $("#catalogueOverlay");
+  const grid = $("#catalogueGrid");
+  const hint = $("#catalogueHint");
+  const input = $("#catalogueSearch");
+  const tabs = $("#catalogueTabs");
+  if (!overlay || !grid || !input) return;
+
+  let filter = "all";
+  let debounceTimer = null;
+  let abortCtrl = null;
+  let lastResults = [];
+
+  function setHint(text) {
+    hint.hidden = !text;
+    hint.textContent = text || "";
+    grid.hidden = !!text;
+  }
+
+  function libraryMatchFor(hit) {
+    if (hit.id && MY_LIBRARY.some((s) => s.imdbId && s.imdbId.toLowerCase() === String(hit.id).toLowerCase())) return true;
+    const key = normalizeTitleKey(hit.title);
+    return MY_LIBRARY.some((s) => normalizeTitleKey(s.name) === key);
+  }
+
+  function renderResults(results) {
+    lastResults = results;
+    const filtered = results.filter((r) => {
+      if (filter === "all") return true;
+      const isMovie = r.typeLabel === "Movie" || r.mediaType === "movie";
+      return filter === "movie" ? isMovie : !isMovie;
+    });
+    if (!filtered.length) { setHint("No matches. Try a different spelling or a shorter title."); return; }
+    setHint("");
+    grid.innerHTML = "";
+    for (const hit of filtered) {
+      const isMovie = hit.typeLabel === "Movie" || hit.mediaType === "movie";
+      const already = libraryMatchFor(hit);
+      const card = document.createElement("div");
+      card.className = "catalogue-card";
+      card.innerHTML = `
+        <div class="catalogue-card-art"${hit.poster ? ` style="background-image:url('${hit.poster}')"` : ""}>
+          <span class="catalogue-card-badge">${esc(hit.typeLabel || (isMovie ? "Movie" : "Series"))}</span>
+        </div>
+        <div class="catalogue-card-body">
+          <div class="catalogue-card-title">${esc(hit.title || "Untitled")}</div>
+          <div class="catalogue-card-meta">${esc(hit.year ? String(hit.year) : "")}</div>
+          <div class="catalogue-card-actions">
+            <button class="btn ${already ? "ghost added" : "primary"}" type="button" data-act="add">${already ? "✓ Added" : "+ Add"}</button>
+            <button class="btn ghost" type="button" data-act="open">${already ? "Open" : "Details"}</button>
+          </div>
+        </div>`;
+      card.querySelector('[data-act="add"]').onclick = () => addCatalogueHit(hit, already);
+      card.querySelector('[data-act="open"]').onclick = () => addCatalogueHit(hit, already);
+      grid.appendChild(card);
+    }
+  }
+
+  async function addCatalogueHit(hit, already) {
+    const existing = already ? (MY_LIBRARY.find((s) => s.imdbId && hit.id && s.imdbId.toLowerCase() === String(hit.id).toLowerCase()) || MY_LIBRARY.find((s) => normalizeTitleKey(s.name) === normalizeTitleKey(hit.title))) : null;
+    closeCatalogue();
+    if (existing) { openLibraryDetail(existing); return; }
+    let imdbId = hit.id && /^tt\d{7,10}$/i.test(hit.id) ? hit.id : "";
+    // TMDB-sourced hits only carry a tmdbId — resolve the IMDb id the same
+    // way the manual autocomplete does, just for the one title picked.
+    if (!imdbId && hit.tmdbId && hit.mediaType) {
+      try {
+        const r = await fetch(`/api/imdb-search?resolve=1&tmdbId=${encodeURIComponent(hit.tmdbId)}&mediaType=${encodeURIComponent(hit.mediaType)}`);
+        const data = await r.json();
+        if (r.ok && data.id) imdbId = data.id;
+      } catch {}
+    }
+    openLibraryForm(null, {
+      title: hit.title,
+      imdbId,
+      mediaType: (hit.typeLabel === "Movie" || hit.mediaType === "movie") ? "movie" : "series",
+      poster: hit.poster || "",
+    });
+  }
+
+  async function runSearch(query) {
+    if (abortCtrl) abortCtrl.abort();
+    if (!query) { setHint("Start typing a title — movies, series and anime all show up here."); return; }
+    setHint("Searching…");
+    abortCtrl = new AbortController();
+    try {
+      const r = await fetch(`/api/imdb-search?q=${encodeURIComponent(query)}`, { signal: abortCtrl.signal });
+      if (!r.ok) { setHint("Search failed — try again in a moment."); return; }
+      const data = await r.json();
+      if (input.value.trim() !== query) return;
+      const results = Array.isArray(data.results) ? data.results : [];
+      if (!results.length) { setHint("No matches. Try a different spelling or a shorter title."); return; }
+      renderResults(results);
+    } catch (e) {
+      if (e?.name !== "AbortError") setHint("Search failed — try again in a moment.");
+    }
+  }
+
+  input.addEventListener("input", () => {
+    const query = input.value.trim();
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => runSearch(query), 300);
+  });
+
+  tabs?.addEventListener("click", (e) => {
+    const btn = e.target.closest?.(".catalogue-tab");
+    if (!btn) return;
+    tabs.querySelectorAll(".catalogue-tab").forEach((b) => b.classList.toggle("active", b === btn));
+    filter = btn.dataset.filter || "all";
+    renderResults(lastResults);
+  });
+
+  $("#catalogueClose")?.addEventListener("click", closeCatalogue);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeCatalogue(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !overlay.hidden) closeCatalogue(); });
+
+  window.openCatalogue = function openCatalogue() {
+    overlay.hidden = false;
+    setHint("Start typing a title — movies, series and anime all show up here.");
+    setTimeout(() => input.focus(), 30);
+  };
+  window.closeCatalogue = closeCatalogue;
+  function closeCatalogue() {
+    overlay.hidden = true;
+    if (abortCtrl) abortCtrl.abort();
+  }
+})();
