@@ -515,14 +515,24 @@ html,body{max-width:100%;overflow-x:hidden;}
 .library-detail,.library-detail-card,.library-detail-body,#detailSeasonContent{min-width:0;max-width:100%;overflow-x:hidden;}
 .detail-season-tabs{display:flex!important;flex-direction:row!important;align-items:flex-start!important;align-content:flex-start!important;justify-content:flex-start!important;flex-wrap:wrap!important;width:100%!important;height:auto!important;min-height:0!important;gap:8px!important;overflow:visible!important;}
 .detail-season-tab{display:flex!important;flex:0 0 auto!important;flex-direction:column!important;width:auto!important;min-width:110px!important;max-width:180px!important;height:auto!important;min-height:0!important;max-height:none!important;writing-mode:horizontal-tb!important;transform:none!important;align-items:flex-start!important;justify-content:center!important;white-space:nowrap!important;}
-.detail-episodes{width:100%;min-width:0;grid-template-columns:repeat(2,minmax(0,1fr))!important;}
-.detail-episode{width:100%;min-width:0;max-width:100%;overflow:hidden;box-sizing:border-box;}
 .detail-episode-copy{min-width:0;overflow:hidden;}
 .detail-episode-art{flex:none;background:#0c1118 center/cover no-repeat;}
 .netflix-card{min-width:0;}
 .netflix-card-skeleton{position:absolute;inset:0;background:linear-gradient(110deg,#151d28 8%,#1e2936 18%,#151d28 33%);background-size:200% 100%;animation:netflixSkeleton 1.2s linear infinite;z-index:0;}
 @keyframes netflixSkeleton{to{background-position:-200% 0;}}
-@media(max-width:820px){.detail-episodes{grid-template-columns:1fr!important;}.detail-season-tab{min-width:100px!important;}}
+
+/* Build 20260814-6: episode list is a single column, always. Earlier passes
+   had several competing rules forcing a 2-column grid; on real widths that
+   squeezed .detail-episode-actions (Watch + Edit) until Edit was clipped by
+   the row's overflow:hidden and effectively invisible, matching the report.
+   A single column gives the action row enough width for both buttons and
+   removes the need to fight specificity with more !important rules. */
+.detail-episodes{width:100%;min-width:0;grid-template-columns:1fr!important;}
+.detail-episode{width:100%;min-width:0;max-width:100%;overflow:visible;box-sizing:border-box;grid-template-columns:150px minmax(0,1fr)!important;}
+.detail-episode-actions{flex-wrap:nowrap!important;}
+.detail-episode-actions .btn{flex:none!important;min-width:0;}
+@media(max-width:820px){.detail-season-tab{min-width:100px!important;}}
+@media(max-width:600px){.detail-episode{grid-template-columns:105px minmax(0,1fr)!important;}}
 
 </style>
 </head>
