@@ -441,7 +441,33 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
             <h2>Library</h2>
             <span>Series and episodes saved on this device</span>
           </div>
-          <button class="btn ghost" id="landingAddBtn" style="padding:7px 11px;font-size:11px">+ Add episode</button>
+          <div style="display:flex;gap:5px">
+            <button class="btn ghost" id="landingImportSubsBtn" style="padding:7px 11px;font-size:11px">Import OpenSubtitles</button>
+            <button class="btn ghost" id="landingAddBtn" style="padding:7px 11px;font-size:11px">+ Add episode</button>
+          </div>
+        </div>
+
+        <div class="library-form" id="subtitleImportWrap" hidden>
+          <form id="subtitleImportForm">
+            <div class="library-form-grid">
+              <label class="field full">
+                <span class="eyebrow">OpenSubtitles search page</span>
+                <input class="input" name="url" placeholder="https://www.opensubtitles.org/en/ssearch/sublanguageid-eng/idmovie-715978" autocapitalize="off" spellcheck="false" required>
+              </label>
+              <label class="field">
+                <span class="eyebrow">IMDb ID</span>
+                <input class="input" name="imdbId" placeholder="tt1234567" pattern="tt\d{7,10}" maxlength="12" required>
+              </label>
+              <div class="landing-ai-note" style="align-self:end">
+                <b>Automatic mapping</b>
+                <span>Uses the official OpenSubtitles API to download the best English subtitle for each detected episode, preferring ASS and falling back to SRT. The pasted .org URL is used as the source/identity input; API credentials stay on the server.</span>
+              </div>
+            </div>
+            <div class="row">
+              <button class="btn ghost" id="subtitleImportCancel" type="button">Cancel</button>
+              <button class="btn primary" type="submit">Import subtitles</button>
+            </div>
+          </form>
         </div>
 
         <div class="library-form" id="libraryFormWrap" hidden>
@@ -456,6 +482,10 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
               <label class="field" id="newSeriesField">
                 <span class="eyebrow">Series name</span>
                 <input class="input" id="librarySeries" name="series" placeholder="Demon Slayer" maxlength="120" required>
+              </label>
+              <label class="field">
+                <span class="eyebrow">IMDb ID</span>
+                <input class="input" name="imdbId" placeholder="tt1234567" pattern="tt\d{7,10}" maxlength="12" required>
               </label>
               <label class="field">
                 <span class="eyebrow">Episode</span>
@@ -474,8 +504,8 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
                 <input class="input" name="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,text/vtt,application/x-subrip">
               </label>
               <div class="landing-ai-note full">
-                <b>Gemini handles metadata only</b>
-                <span>It identifies the episode and finds IMDb details. Subtitles are supplied by you and the actual subtitle text is preserved with the episode.</span>
+                <b>IMDb is the identity key</b>
+                <span>Use the IMDb ID for the series/movie. Parallel uses it to map the video link and imported subtitles to the right title, season and episode.</span>
               </div>
             </div>
             <div class="row">
