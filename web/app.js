@@ -100,6 +100,16 @@ function say(msg) {
   toastT = setTimeout(() => t.classList.remove("on"), 3200);
 }
 
+/* A system line in the room chat — "X joined the room", "X changed the
+ * video", etc. Distinct from a text message (no `text` field, `sys: true`)
+ * so addMsg() can render it centered and un-attributed rather than as
+ * something someone said. */
+function pushSystemMsg(text) {
+  if (!R.refs?.chat || !R.uid) return;
+  push(R.refs.chat, { uid: R.uid, sys: true, text: String(text).slice(0, 400), at: serverTimestamp() })
+    .catch(() => {});
+}
+
 /* ------------------------------------------------------------------ state */
 const R = {
   uid: null, name: "", room: "",
@@ -110,6 +120,7 @@ const R = {
   dragging: false, blocked: false, seenSep: false, shownResume: "",
   refs: {},
   pendingSource: null,
+  announcedJoin: false, hadMemberSnapshot: false,
 };
 
 /* ------------------------------------------------------------------ icons */
@@ -2309,6 +2320,13 @@ function wireRoom() {
     set(R.refs.me, {
       name: R.name, pos: 0, dur: 0, stalled: false,
       voice: VOICE.on, noFile: false, at: serverTimestamp(),
+    }).then(() => {
+      // Only announce the first successful connect. A network blip that
+      // re-triggers .info/connected shouldn't post "joined the room" again.
+      if (!R.announcedJoin) {
+        R.announcedJoin = true;
+        pushSystemMsg(`${R.name} joined the room`);
+      }
     }).catch((e) => fbError(e, "presence write"));
   });
 
@@ -2340,6 +2358,8 @@ function wireRoom() {
       ref: st.ref || "",
       episodeTitle: st.title || "",
     });
+    const head = $("#chatTitle");
+    if (head) head.textContent = st.title || "Nothing yet";
     applyState(st);
   }, (e) => fbError(e, "room read"));
 
@@ -2354,9 +2374,26 @@ function wireRoom() {
 
   onValue(R.refs.members, (s) => {
     const val = s.val() || {};
-    R.members = Object.entries(val)
+    const next = Object.entries(val)
       .map(([uid, m]) => ({ uid, ...m }))
       .sort((a, b) => (a.at || 0) - (b.at || 0));
+
+    // Diff against the previous snapshot to catch members who left. Every
+    // remaining client sees the same diff, so only the earliest-joined
+    // survivor announces it — same election rule electHost() below uses —
+    // otherwise a room of N people would post N copies of "X left".
+    if (R.hadMemberSnapshot) {
+      const stillHere = new Set(next.map((m) => m.uid));
+      const iAmAnnouncer = !next.length || next[0].uid === R.uid;
+      for (const gone of R.members) {
+        if (!stillHere.has(gone.uid) && gone.uid !== R.uid && iAmAnnouncer) {
+          pushSystemMsg(`${gone.name || "Someone"} left the room`);
+        }
+      }
+    }
+    R.hadMemberSnapshot = true;
+
+    R.members = next;
     drawMembers();
     electHost();
   });
@@ -3149,10 +3186,13 @@ function setSource(src, startAt = 0) {
     return say("This source has no playable link. Re-add the episode link from the library.");
   }
 
+  const title = String(src?.title || "Untitled");
+  const prevTitle = R.state?.title || "";
+
   const patch = {
     kind,
     ref,
-    title: String(src?.title || "Untitled"),
+    title,
     label: String(src?.label || ""),
     size: Number(src?.size || 0),
     subs: Array.isArray(src?.subs) ? src.subs : [],
@@ -3163,6 +3203,13 @@ function setSource(src, startAt = 0) {
   };
 
   ctl(patch);
+
+  // Announce it once, from whoever's client just made the switch — this is
+  // the single chokepoint every "load a video" path runs through, so there's
+  // no risk of every member's client posting its own copy of the message.
+  if (title && title !== prevTitle) {
+    pushSystemMsg(`${R.name} changed the video to "${title}"`);
+  }
 }
 
 /* --------------------------------------------------------- local files
@@ -4023,6 +4070,31 @@ $("#chatIn").addEventListener("keydown", (e) => {
 function addMsg(m) {
   if (!m) return;
   const box = $("#msgs");
+
+  if (m.sys) {
+    const el = document.createElement("div");
+    el.className = "msg sys";
+    el.textContent = m.text || "";
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return;
+  }
+
+  if (m.reaction) {
+    const i = R.members.findIndex((x) => x.uid === m.uid);
+    const el = document.createElement("div");
+    el.className = "msg reaction";
+    el.innerHTML =
+      `<span class="from" style="color:${colorOf(i < 0 ? 0 : i)}">${esc(m.name || "Guest")}</span>` +
+      `<span class="rx-emoji">${m.reaction}</span>`;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    // The sender already saw their own reaction float locally on click; only
+    // float it here for everyone else, so it doesn't double-fire for them.
+    if (m.uid !== R.uid) floatReaction(m.reaction);
+    return;
+  }
+
   const i = R.members.findIndex((x) => x.uid === m.uid);
   const el = document.createElement("div");
   el.className = "msg";
@@ -4030,6 +4102,33 @@ function addMsg(m) {
   box.appendChild(el);
   box.scrollTop = box.scrollHeight;
 }
+
+/* --------------------------------------------------------- reactions
+ * Quick emoji reactions ride the same chat node as text messages (with a
+ * `reaction` field instead of `text`) so they show up in the log too, and
+ * carry the room's playback position at send time so a future "show me what
+ * happened at 01:32" replay has something to key off. */
+function floatReaction(emoji) {
+  const layer = $("#reactions");
+  if (!layer) return;
+  const el = document.createElement("span");
+  el.className = "rx-float";
+  el.textContent = emoji;
+  el.style.left = `${22 + Math.random() * 56}%`;
+  layer.appendChild(el);
+  el.addEventListener("animationend", () => el.remove());
+}
+
+$$("#reactBar .rx").forEach((b) => {
+  b.onclick = () => {
+    const emoji = b.dataset.e;
+    floatReaction(emoji);
+    push(R.refs.chat, {
+      uid: R.uid, name: R.name, reaction: emoji,
+      pos: R.state ? expectedPos() : 0, at: serverTimestamp(),
+    }).catch((e) => fbError(e, "reaction"));
+  };
+});
 
 $("#copyBtn").onclick = async () => {
   const link = location.origin + location.pathname + "#" + R.room;
