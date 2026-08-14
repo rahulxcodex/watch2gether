@@ -1842,7 +1842,7 @@ const roll = () => {
 };
 
 $("#dbLabel").textContent = (firebaseConfig.projectId || "firebase");
-$("#who").value = localStorage.wtName || "";
+$("#who").value = (() => { try { return localStorage.wtName || ""; } catch { return ""; } })();
 $("#code").value = (decodeURIComponent(location.hash.slice(1)) || roll()).toLowerCase();
 $("#roll").onclick = () => ($("#code").value = roll());
 $("#enter").onclick = join;
@@ -3415,7 +3415,7 @@ function applyLook() {
     : LOOK.delay > 0 ? `${LOOK.delay.toFixed(1)}s later` : `${(-LOOK.delay).toFixed(1)}s earlier`;
   R.delay = LOOK.delay;
   R.cueIdx = -1;
-  localStorage.wtLook = JSON.stringify(LOOK);
+  try { localStorage.wtLook = JSON.stringify(LOOK); } catch {}
 }
 
 /* Sized as a share of the picture, not a fixed pixel count, so it reads the
@@ -4089,7 +4089,7 @@ function drawQuals() {
  * Chunked, because Cloudflare caps a request body at 100 MB and films are not
  * that. Only reachable when a Worker is configured. */
 
-const UP = { token: localStorage.wtUpToken || "", size: 24 * 1024 * 1024, busy: 0 };
+const UP = { token: (() => { try { return localStorage.wtUpToken || ""; } catch { return ""; } })(), size: 24 * 1024 * 1024, busy: 0 };
 const authHeaders = () => ({ "x-upload-token": UP.token });
 const SUB_RE = /\.(srt|vtt|ass|ssa)$/i;
 const slugify = (s) => s.toLowerCase().replace(/\.[^.]+$/, "")
@@ -4141,7 +4141,7 @@ async function takeFiles(files) {
       ok: "Save",
     });
     if (!t) return;
-    UP.token = localStorage.wtUpToken = t;
+    try { UP.token = localStorage.wtUpToken = t; } catch { UP.token = t; }
   }
 
   const current = R.state?.kind === "r2" ? String(R.state.ref).split("/")[1] : "";
