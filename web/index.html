@@ -346,85 +346,30 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 }
 
 /* ------------------------------------------------------------- landing */
-#landing{display:none;height:100dvh;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;background:var(--bg);color:var(--text)}
+#landing{display:none;min-height:100dvh;overflow-y:auto;overflow-x:hidden;background:#080808;color:var(--text)}
 #landing.on{display:block}
-.landing-wrap{width:min(1040px,100%);margin:0 auto;padding:42px 22px 64px}
-.landing-hero{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:34px}
-.landing-brand{display:flex;align-items:center;gap:11px}
-.landing-brand .mark{font-size:20px}
-.landing-hero h1{font-size:clamp(30px,5vw,54px);font-weight:500;letter-spacing:-.04em;margin:14px 0 8px}
-.landing-hero p{margin:0;color:var(--dim);max-width:650px;line-height:1.6}
-.landing-actions{display:flex;gap:8px;flex:none}
-.landing-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:18px}
-.landing-panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;overflow:hidden}
-.landing-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px 18px;border-bottom:1px solid var(--line)}
-.landing-panel-head h2{font-size:15px;font-weight:500;margin:0}
-.landing-panel-head span{font-size:11px;color:var(--dimmer)}
-.library-form{padding:16px;border-bottom:1px solid var(--line)}
-.library-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.checkbox-field{display:flex;flex-direction:row;align-items:center;gap:8px}
-.checkbox-field input[type="checkbox"]{width:16px;height:16px;flex:none}
-.library-form .field{margin:0}
-.library-form .field.full{grid-column:1/-1}
-.library-form .row{margin-top:12px}
-.continue-card{margin:14px;padding:14px;border:1px solid rgba(94,234,212,.28);background:rgba(94,234,212,.06);border-radius:11px;display:flex;justify-content:space-between;align-items:center;gap:15px}
-.continue-card b{display:block;font-size:14px;margin:5px 0}
-.continue-card small{display:block;color:var(--dimmer);font-family:var(--mono);font-size:10px}
-.imdb-suggest{position:absolute;top:100%;left:0;right:0;z-index:20;margin-top:4px;background:var(--panel,#181818);border:1px solid var(--line-soft);border-radius:8px;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.imdb-suggest-item{display:flex;align-items:center;gap:9px;padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--line-soft)}
-.imdb-suggest-item:last-child{border-bottom:0}
-.imdb-suggest-item:hover,.imdb-suggest-item.active{background:rgba(255,255,255,.06)}
-.imdb-suggest-item img{width:28px;height:40px;object-fit:cover;border-radius:3px;background:#222;flex-shrink:0}
-.imdb-suggest-item .imdb-suggest-info{min-width:0;flex:1}
-.imdb-suggest-item .imdb-suggest-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.imdb-suggest-item .imdb-suggest-meta{font-size:10px;color:var(--dimmer)}
-.imdb-suggest-item .imdb-suggest-badge{font-size:9px;padding:2px 6px;border-radius:20px;border:1px solid var(--line-soft);color:var(--dimmer);flex-shrink:0}
-.imdb-suggest-empty{padding:9px 10px;font-size:11px;color:var(--dimmer)}
-.library-series{border-bottom:1px solid var(--line-soft)}
-.library-series:last-child{border-bottom:0}
-.library-series-head{display:flex;justify-content:space-between;align-items:center;padding:15px 17px 9px}
-.library-series-head h3{margin:0 0 4px;font-size:15px;font-weight:500}
-.library-series-head span{font-size:10px;color:var(--dimmer)}
-.library-series-actions{display:flex;gap:4px;flex-shrink:0}
-.library-delete-series,.library-add-episode,.episode-delete,.room-delete{color:var(--dimmer);font-size:11px;padding:5px 7px}
-.library-add-episode:hover{color:var(--accent,#5EEAD4)}
-.library-delete-series:hover,.episode-delete:hover,.room-delete:hover{color:var(--warn)}
-.library-episode{display:flex;align-items:center;gap:12px;padding:10px 17px 10px 29px;border-top:1px solid var(--line-soft)}
-.episode-meta{min-width:0;flex:1}
-.episode-meta b{display:block;font-size:13px;font-weight:450;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.episode-meta span{display:block;margin-top:3px;font-size:10px;color:var(--dimmer)}
-.episode-actions{display:flex;gap:5px;align-items:center}
-.episode-actions .btn{padding:7px 11px;font-size:11px}
-.landing-empty{padding:28px 18px;color:var(--dimmer);font-size:12px;line-height:1.55;text-align:center}
-.landing-empty b{display:block;color:var(--dim);font-weight:500;margin-bottom:5px}
-.saved-room-list{padding:0 14px 14px}
-.saved-room{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 3px;border-bottom:1px solid var(--line-soft)}
-.saved-room:last-child{border-bottom:0}
-.saved-room b{display:block;font-size:12px;font-weight:500}
-.saved-room .mono{display:block;font-size:10px;color:var(--you);margin-top:3px}
-.saved-room small{display:block;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dimmer);font-size:10px;margin-top:3px}
-.saved-room-actions{display:flex;gap:3px;flex:none}
-.saved-room-actions .btn{padding:7px 10px;font-size:11px}
-@media(max-width:760px){
-  .landing-wrap{padding:28px 14px 50px}
-  .landing-hero{display:block}
-  .landing-actions{margin-top:18px}
-  .landing-grid{grid-template-columns:1fr}
-  .library-form-grid{grid-template-columns:1fr}
-  .library-form .field.full{grid-column:auto}
-}
-
-
-.landing-ai-note{padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--raise);font-size:11px;line-height:1.45}
-.landing-ai-note b{display:block;color:var(--text);font-weight:500;margin-bottom:3px}
-.landing-ai-note span{color:var(--dim)}
-.library-series-meta{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:10px;color:var(--dimmer)}
-.library-year{font-size:11px;color:var(--dimmer);font-weight:400}
-.imdb-link{color:var(--warn);text-decoration:none;font-size:10px}
-.imdb-link:hover{text-decoration:underline}
-.library-genres{color:var(--dimmer)}
-.library-summary{margin:8px 0 2px;max-width:72ch;color:var(--dim);font-size:11px;line-height:1.5}
-.episode-summary{margin:5px 0 0;color:var(--dimmer);font-size:10.5px;line-height:1.45;max-width:75ch}
+.landing-wrap{width:100%;margin:0 auto;padding:0 0 70px}
+.netflix-nav{position:sticky;top:0;z-index:30;height:66px;display:flex;align-items:center;gap:28px;padding:0 clamp(18px,4vw,54px);background:linear-gradient(180deg,rgba(5,5,5,.98),rgba(5,5,5,.78),transparent);backdrop-filter:blur(8px)}
+.netflix-brand{display:flex;align-items:baseline;gap:9px;flex:none}.netflix-brand b{font-size:25px;font-weight:700;letter-spacing:-.03em}.netflix-brand .mark-bars{height:18px}.netflix-brand .mark-bars i:nth-child(1){height:18px}.netflix-brand .mark-bars i:nth-child(2){height:11px}
+.netflix-nav-links{display:flex;gap:20px;color:#c8c8c8;font-size:13px}.netflix-nav-links button:hover{color:#fff}.netflix-nav-spacer{flex:1}.netflix-nav-actions{display:flex;gap:7px}
+.netflix-nav .btn{padding:8px 12px;font-size:11px;border-radius:7px;background:rgba(25,25,25,.8)}
+.netflix-hero{position:relative;min-height:520px;margin-top:-66px;display:flex;align-items:flex-end;padding:120px clamp(18px,6vw,78px) 60px;overflow:hidden;background:#0d0d0d}
+.netflix-hero-backdrop{position:absolute;inset:0;background-position:center;background-size:cover;opacity:.8;transition:opacity .3s,background-image .3s}.netflix-hero-backdrop:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#080808 0%,rgba(8,8,8,.9) 26%,rgba(8,8,8,.45) 60%,rgba(8,8,8,.1) 100%),linear-gradient(0deg,#080808 0%,transparent 38%,rgba(8,8,8,.35) 100%)}
+.netflix-hero-copy{position:relative;z-index:2;max-width:650px}.netflix-kicker{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#d0d0d0;margin-bottom:12px}.netflix-hero h1{font-size:clamp(34px,5vw,64px);line-height:1.02;letter-spacing:-.045em;margin:0 0 14px;font-weight:700}.netflix-meta{display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:#d1d1d1;font-size:12px;margin-bottom:13px}.netflix-meta .rating{font-weight:700;color:#fff}.netflix-summary{max-width:58ch;color:#c2c2c2;font-size:14px;line-height:1.6;margin:0 0 20px}.netflix-hero-actions{display:flex;gap:9px}.netflix-hero-actions .btn{padding:10px 17px;border-radius:7px;font-size:12px}.netflix-hero-actions .watch{background:#fff;color:#111;border-color:#fff;font-weight:700}
+.netflix-main{padding:0 clamp(18px,4vw,54px)}.netflix-section{margin:0 0 34px}.netflix-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}.netflix-section-head h2{font-size:19px;margin:0;font-weight:600;letter-spacing:-.02em}.netflix-section-head span{font-size:10px;color:#8c8c8c}.netflix-row{display:flex;gap:12px;overflow-x:auto;padding:3px 4px 13px 2px;scrollbar-width:none}.netflix-row::-webkit-scrollbar{display:none}
+.netflix-card{position:relative;flex:0 0 clamp(132px,12vw,180px);aspect-ratio:2/3;border-radius:5px;overflow:hidden;background:#161616;cursor:pointer;box-shadow:0 8px 22px rgba(0,0,0,.28);transform:translateZ(0);transition:transform .18s,box-shadow .18s}.netflix-card:hover{transform:scale(1.045);z-index:4;box-shadow:0 16px 34px rgba(0,0,0,.5)}.netflix-card img{width:100%;height:100%;display:block;object-fit:cover}.netflix-card .poster-fallback{width:100%;height:100%;display:grid;place-items:center;text-align:center;padding:16px;background:linear-gradient(145deg,#20242b,#0d1015);font-size:15px;font-weight:600}.netflix-card:after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(transparent,rgba(0,0,0,.92));pointer-events:none}.netflix-card-info{position:absolute;z-index:2;left:10px;right:10px;bottom:9px}.netflix-card-info b{display:block;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.netflix-card-info span{display:block;color:#c3c3c3;font-size:9.5px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.netflix-progress{position:absolute;z-index:3;left:0;right:0;bottom:0;height:3px;background:#333}.netflix-progress i{display:block;height:100%;background:#e50914;width:var(--progress,0%)}
+.netflix-rooms{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 10px;scrollbar-width:none}.netflix-room{min-width:240px;flex:0 0 240px;padding:15px;border-radius:7px;background:#171717;border:1px solid #292929}.netflix-room b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.netflix-room .mono{display:block;color:#9d9d9d;font-size:9px;margin-top:4px}.netflix-room small{display:block;color:#6f6f6f;font-size:10px;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.netflix-room-actions{display:flex;gap:6px;margin-top:11px}.netflix-room-actions .btn{padding:7px 10px;font-size:10px}
+.netflix-empty{padding:38px 20px;text-align:center;border:1px dashed #292929;border-radius:7px;color:#777}.netflix-empty b{display:block;color:#bbb;margin-bottom:5px}.netflix-empty span{font-size:11px}
+.netflix-credit{margin-top:38px;padding:0 2px;color:#666;font-size:10px}.netflix-credit a{color:#999;text-decoration:none}.netflix-credit a:hover{text-decoration:underline}
+/* Existing forms remain functional, but open as Netflix-style overlays. */
+.netflix-form-overlay{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.72);backdrop-filter:blur(9px);display:grid;place-items:center;padding:20px}.netflix-form-overlay[hidden]{display:none}.netflix-form-card{width:min(760px,100%);max-height:90dvh;overflow:auto;background:#151515;border:1px solid #2d2d2d;border-radius:9px;box-shadow:0 30px 90px rgba(0,0,0,.7)}.netflix-form-card .library-form{border:0;padding:20px}.netflix-form-card .library-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.netflix-form-card .field.full{grid-column:1/-1}.netflix-form-card .library-form-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #292929}.netflix-form-card .library-form-head b{font-size:16px}.netflix-close{font-size:22px;color:#888;padding:3px 8px}.netflix-close:hover{color:#fff}
+.imdb-suggest{position:absolute;top:100%;left:0;right:0;z-index:90;margin-top:4px;background:#181818;border:1px solid #333;border-radius:6px;max-height:280px;overflow-y:auto;box-shadow:0 12px 30px rgba(0,0,0,.6)}
+.imdb-suggest-item{display:flex;align-items:center;gap:9px;padding:7px 10px;cursor:pointer;border-bottom:1px solid #282828}.imdb-suggest-item:last-child{border-bottom:0}.imdb-suggest-item:hover,.imdb-suggest-item.active{background:#242424}.imdb-suggest-item img{width:28px;height:40px;object-fit:cover;border-radius:3px;background:#222;flex-shrink:0}.imdb-suggest-item .imdb-suggest-info{min-width:0;flex:1}.imdb-suggest-item .imdb-suggest-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.imdb-suggest-item .imdb-suggest-meta{font-size:10px;color:#888}.imdb-suggest-item .imdb-suggest-badge{font-size:9px;padding:2px 6px;border-radius:20px;border:1px solid #333;color:#888;flex-shrink:0}.imdb-suggest-empty{padding:9px 10px;font-size:11px;color:#777}
+.library-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.checkbox-field{display:flex;flex-direction:row;align-items:center;gap:8px}.checkbox-field input[type="checkbox"]{width:16px;height:16px;flex:none}.library-form .field{margin:0}.library-form .field.full{grid-column:1/-1}.library-form .row{margin-top:12px}.landing-ai-note{padding:11px 12px;border:1px solid #2c2c2c;border-radius:7px;background:#1b1b1b;font-size:11px;line-height:1.45}.landing-ai-note b{display:block;color:#eee;font-weight:500;margin-bottom:3px}.landing-ai-note span{color:#999}.imdb-link{color:#e4b15f;text-decoration:none;font-size:10px}.library-summary{margin:8px 0 2px;color:#999;font-size:11px;line-height:1.5}.episode-summary{margin:5px 0 0;color:#777;font-size:10.5px;line-height:1.45}
+/* Detail modal */
+.library-detail{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.78);backdrop-filter:blur(10px);display:grid;place-items:center;padding:18px}.library-detail[hidden]{display:none}.library-detail-card{position:relative;width:min(940px,100%);max-height:92dvh;overflow:auto;background:#141414;border-radius:9px;box-shadow:0 30px 100px rgba(0,0,0,.75);border:1px solid #2a2a2a}.library-detail-hero{position:relative;min-height:310px;background:#1c1c1c center/cover no-repeat}.library-detail-hero:after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,#141414 0%,rgba(20,20,20,.18) 58%,rgba(0,0,0,.25) 100%)}.library-detail-copy{position:absolute;z-index:2;left:28px;right:28px;bottom:25px;max-width:650px}.library-detail-copy h2{margin:0 0 8px;font-size:30px;line-height:1.05}.library-detail-copy p{margin:0;color:#bbb;font-size:12px;line-height:1.5}.library-detail-close{position:absolute;z-index:4;right:12px;top:10px;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px}.library-detail-body{padding:18px 24px 26px}.library-detail-body h3{font-size:15px;margin:0 0 12px}.detail-episodes{display:grid;grid-template-columns:1fr 1fr;gap:8px}.detail-episode{display:flex;gap:10px;align-items:center;padding:10px;background:#1b1b1b;border-radius:5px}.detail-episode b{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.detail-episode small{display:block;color:#777;font-size:9px;margin-top:3px}.detail-episode .btn{margin-left:0;flex:none;padding:7px 10px;font-size:10px}.detail-episode .edit-episode-btn{margin-left:auto}
+@media(max-width:760px){.netflix-nav-links{display:none}.netflix-nav{gap:12px}.netflix-hero{min-height:480px;padding:120px 20px 42px}.netflix-hero h1{font-size:40px}.netflix-main{padding:0 16px}.netflix-card{flex-basis:132px}.netflix-form-card .library-form-grid{grid-template-columns:1fr}.netflix-form-card .field.full{grid-column:auto}.detail-episodes{grid-template-columns:1fr}.library-detail-copy{left:18px;right:18px}.library-detail-body{padding:15px}.netflix-nav-actions .btn:first-child{display:none}}
 </style>
 </head>
 <body>
@@ -432,135 +377,139 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 
 <div id="landing">
   <div class="landing-wrap">
-    <header class="landing-hero">
-      <div>
-        <div class="landing-brand">
-          <div class="mark"><span class="mark-bars"><i></i><i></i></span><b>Parallel</b></div>
-        </div>
-        <h1>Your anime library.</h1>
-        <p>Keep your series, episode links, subtitles and watch-together rooms in one place. Pick an episode and jump straight back into its saved room.</p>
+    <nav class="netflix-nav">
+      <div class="netflix-brand"><span class="mark-bars"><i></i><i></i></span><b>Parallel</b></div>
+      <div class="netflix-nav-links">
+        <button type="button" id="navHome">Home</button>
+        <button type="button" id="navMovies">Movies</button>
+        <button type="button" id="navSeries">Series</button>
+        <button type="button" id="navRooms">Rooms</button>
+        <button type="button" id="navImportSubs">Import subtitles</button>
       </div>
-      <div class="landing-actions">
+      <div class="netflix-nav-spacer"></div>
+      <div class="netflix-nav-actions">
         <button class="btn ghost" id="landingJoinBtn">Join room</button>
         <button class="btn primary" id="landingNewRoomBtn">New room</button>
       </div>
-    </header>
+    </nav>
 
-    <div class="landing-grid">
-      <section class="landing-panel">
-        <div class="landing-panel-head">
-          <div>
-            <h2>Library</h2>
-            <span>Series and episodes saved on this device</span>
-          </div>
-          <div style="display:flex;gap:5px">
-            <button class="btn ghost" id="landingImportSubsBtn" style="padding:7px 11px;font-size:11px">Import OpenSubtitles</button>
-            <button class="btn ghost" id="landingAddBtn" style="padding:7px 11px;font-size:11px">+ Add episode</button>
-          </div>
+    <section class="netflix-hero" id="libraryHero">
+      <div class="netflix-hero-backdrop" id="libraryHeroBackdrop"></div>
+      <div class="netflix-hero-copy">
+        <div class="netflix-kicker" id="libraryHeroKicker">MY LIBRARY</div>
+        <h1 id="libraryHeroTitle">Your library</h1>
+        <div class="netflix-meta" id="libraryHeroMeta"></div>
+        <p class="netflix-summary" id="libraryHeroSummary">Add a movie or series to build your personal library.</p>
+        <div class="netflix-hero-actions">
+          <button class="btn watch" id="libraryHeroWatch" type="button">▶ Play</button>
+          <button class="btn ghost" id="libraryHeroInfo" type="button">ⓘ More info</button>
+          <button class="btn ghost" id="landingAddBtn" type="button">＋ Add title</button>
         </div>
+      </div>
+    </section>
 
-        <div class="library-form" id="subtitleImportWrap" hidden>
-          <form id="subtitleImportForm">
-            <div class="library-form-grid">
-              <label class="field full">
-                <span class="eyebrow">OpenSubtitles search page</span>
-                <input class="input" name="url" placeholder="https://www.opensubtitles.org/en/ssearch/sublanguageid-eng/idmovie-715978" autocapitalize="off" spellcheck="false" required>
-              </label>
-              <label class="field">
-                <span class="eyebrow">IMDb ID</span>
-                <input class="input" name="imdbId" placeholder="tt1234567" pattern="tt\d{7,10}" maxlength="12" required>
-              </label>
-              <label class="field">
-                <span class="eyebrow">Season (optional)</span>
-                <input class="input" name="seasonNumber" type="number" min="1" max="50" placeholder="e.g. 1">
-              </label>
-              <label class="field full">
-                <span class="eyebrow">Episodes (optional)</span>
-                <input class="input" name="episodeNumbers" placeholder="e.g. 1-5, 8, 10  (leave blank for all episodes in the season)">
-              </label>
-              <div class="landing-ai-note" style="align-self:end">
-                <b>Automatic mapping</b>
-                <span>Uses the official OpenSubtitles API to download the best English subtitle for each detected episode, preferring ASS and falling back to SRT. The pasted .org URL is used as the source/identity input; API credentials stay on the server. For seasons with 20+ episodes, use the season and episode fields to pull only what you need instead of the whole season at once.</span>
-              </div>
-            </div>
-            <div class="row">
-              <button class="btn ghost" id="subtitleImportCancel" type="button">Cancel</button>
-              <button class="btn primary" type="submit">Import subtitles</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="library-form" id="libraryFormWrap" hidden>
-          <form id="libraryForm">
-            <div class="library-form-grid">
-              <label class="field">
-                <span class="eyebrow">Series</span>
-                <select class="input" id="librarySeriesSelect">
-                  <option value="">+ New series</option>
-                </select>
-              </label>
-              <label class="field" id="newSeriesField" style="position:relative">
-                <span class="eyebrow">Series name</span>
-                <input class="input" id="librarySeries" name="series" placeholder="Demon Slayer" maxlength="120" autocomplete="off" required>
-                <div class="imdb-suggest" id="imdbSuggest" hidden></div>
-              </label>
-              <label class="field">
-                <span class="eyebrow">IMDb ID <small id="imdbIdHint" hidden>· auto-filled</small></span>
-                <input class="input" name="imdbId" id="libraryImdbId" placeholder="tt1234567 (auto-fills as you type the name)" pattern="tt\d{7,10}" maxlength="12" required>
-              </label>
-              <label class="field full checkbox-field">
-                <input type="checkbox" id="libraryIsMovie" name="isMovie">
-                <span class="eyebrow">This is a movie <small>(no season/episode)</small></span>
-              </label>
-              <label class="field" id="seasonField">
-                <span class="eyebrow">Season</span>
-                <input class="input" name="seasonNumber" type="number" min="1" max="99" placeholder="1" required>
-              </label>
-              <label class="field" id="episodeField">
-                <span class="eyebrow">Episode</span>
-                <input class="input" name="episodeNumber" type="number" min="1" max="999" placeholder="1" required>
-              </label>
-              <label class="field full">
-                <span class="eyebrow">Episode title <small>(optional)</small></span>
-                <input class="input" name="episode" placeholder="Cruelty" maxlength="120">
-              </label>
-              <label class="field full">
-                <span class="eyebrow">Episode link</span>
-                <input class="input" name="url" placeholder="https://.../playlist.m3u8" autocapitalize="off" spellcheck="false" required>
-              </label>
-              <label class="field full">
-                <span class="eyebrow">English subtitle URL <small>(optional — leave blank to auto-download)</small></span>
-                <input class="input" name="subtitleUrl" placeholder="https://.../english.srt" autocapitalize="off" spellcheck="false">
-              </label>
-              <label class="field full">
-                <span class="eyebrow">Or upload subtitle file <small>(.srt, .vtt, .ass, .ssa · max 1.5 MB)</small></span>
-                <input class="input" name="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,text/vtt,application/x-subrip">
-              </label>
-              <div class="landing-ai-note full">
-                <b>Subtitles download automatically</b>
-                <span id="autoSubNote">Since you already entered the season and episode number, Parallel pulls the best matching English subtitle for that exact episode straight from OpenSubtitles — no separate lookup step. If none is found, you'll be asked whether to upload a file by hand instead.</span>
-              </div>
-            </div>
-            <div class="row">
-              <button class="btn ghost" id="libraryCancel" type="button">Cancel</button>
-              <button class="btn primary" type="submit">Analyze &amp; add</button>
-            </div>
-          </form>
-        </div>
-
-        <div id="landingLibrary"></div>
+    <main class="netflix-main">
+      <section class="netflix-section" id="continueSection" hidden>
+        <div class="netflix-section-head"><h2>Continue watching</h2><span>Your saved rooms</span></div>
+        <div class="netflix-rooms" id="continueRow"></div>
       </section>
 
-      <section class="landing-panel">
-        <div class="landing-panel-head">
-          <div>
-            <h2>Saved rooms</h2>
-            <span>Room codes are remembered on this device</span>
-          </div>
-        </div>
-        <div id="landingRooms"></div>
+      <section class="netflix-section" id="moviesSection" hidden>
+        <div class="netflix-section-head"><h2>Movies</h2><span>From your library</span></div>
+        <div class="netflix-row" id="moviesRow"></div>
       </section>
+
+      <section class="netflix-section" id="seriesSection" hidden>
+        <div class="netflix-section-head"><h2>Series</h2><span>Episodes ready to watch</span></div>
+        <div class="netflix-row" id="seriesRow"></div>
+      </section>
+
+      <section class="netflix-section" id="allSection">
+        <div class="netflix-section-head"><h2>My Library</h2><span id="libraryCount">0 titles</span></div>
+        <div class="netflix-row" id="allRow"></div>
+      </section>
+
+      <div id="landingEmpty" class="netflix-empty" hidden>
+        <b>Your library is empty.</b>
+        <span>Add a movie or series, then Parallel will fetch its poster and backdrop from TMDB.</span>
+      </div>
+
+      <section class="netflix-section" id="roomsSection">
+        <div class="netflix-section-head"><h2>Saved rooms</h2><span>Stored on this device</span></div>
+        <div class="netflix-rooms" id="landingRooms"></div>
+      </section>
+
+      <div class="netflix-credit">This product uses the TMDB API but is not endorsed or certified by TMDB. <a href="https://www.themoviedb.org/" target="_blank" rel="noopener">The Movie Database</a></div>
+    </main>
+  </div>
+</div>
+
+<!-- Existing add/import forms are kept, but presented as Netflix-style modals. -->
+<div class="netflix-form-overlay" id="libraryFormOverlay" hidden>
+  <div class="netflix-form-card">
+    <div class="library-form-head"><b>Add to library</b><button class="netflix-close" id="libraryFormClose" type="button">×</button></div>
+    <div class="library-form" id="libraryFormWrap" hidden>
+      <form id="libraryForm">
+        <div class="library-form-grid">
+          <label class="field"><span class="eyebrow">Series</span><select class="input" id="librarySeriesSelect"><option value="">+ New series</option></select></label>
+          <label class="field" id="newSeriesField" style="position:relative"><span class="eyebrow">Series name</span><input class="input" id="librarySeries" name="series" placeholder="Demon Slayer" maxlength="120" autocomplete="off" required><div class="imdb-suggest" id="imdbSuggest" hidden></div></label>
+          <label class="field"><span class="eyebrow">IMDb ID <small id="imdbIdHint" hidden>· auto-filled</small></span><input class="input" name="imdbId" id="libraryImdbId" placeholder="tt1234567 (auto-fills as you type the name)" pattern="tt\d{7,10}" maxlength="12" required></label>
+          <label class="field full checkbox-field"><input type="checkbox" id="libraryIsMovie" name="isMovie"><span class="eyebrow">This is a movie <small>(no season/episode)</small></span></label>
+          <label class="field" id="seasonField"><span class="eyebrow">Season</span><input class="input" name="seasonNumber" type="number" min="1" max="99" placeholder="1" required></label>
+          <label class="field" id="episodeField"><span class="eyebrow">Episode</span><input class="input" name="episodeNumber" type="number" min="1" max="999" placeholder="1" required></label>
+          <label class="field full"><span class="eyebrow">Episode title <small>(optional)</small></span><input class="input" name="episode" placeholder="Cruelty" maxlength="120"></label>
+          <label class="field full"><span class="eyebrow">Episode link</span><input class="input" name="url" placeholder="https://.../playlist.m3u8" autocapitalize="off" spellcheck="false" required></label>
+          <label class="field full"><span class="eyebrow">English subtitle URL <small>(optional — leave blank to auto-download)</small></span><input class="input" name="subtitleUrl" placeholder="https://.../english.srt" autocapitalize="off" spellcheck="false"></label>
+          <label class="field full"><span class="eyebrow">Or upload subtitle file <small>(.srt, .vtt, .ass, .ssa · max 1.5 MB)</small></span><input class="input" name="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,text/vtt,application/x-subrip"></label>
+          <div class="landing-ai-note full"><b>Subtitles download automatically</b><span id="autoSubNote">Since you already entered the season and episode number, Parallel pulls the best matching English subtitle for that exact episode straight from OpenSubtitles.</span></div>
+        </div>
+        <div class="row"><button class="btn ghost" id="libraryCancel" type="button">Cancel</button><button class="btn primary" type="submit">Analyze &amp; add</button></div>
+      </form>
     </div>
+  </div>
+</div>
+
+<div class="netflix-form-overlay" id="subtitleImportOverlay" hidden>
+  <div class="netflix-form-card">
+    <div class="library-form-head"><b>Import OpenSubtitles</b><button class="netflix-close" id="subtitleImportClose" type="button">×</button></div>
+    <div class="library-form" id="subtitleImportWrap">
+      <form id="subtitleImportForm">
+        <div class="library-form-grid">
+          <label class="field full"><span class="eyebrow">OpenSubtitles search page</span><input class="input" name="url" placeholder="https://www.opensubtitles.org/en/ssearch/..." autocapitalize="off" spellcheck="false" required></label>
+          <label class="field"><span class="eyebrow">IMDb ID</span><input class="input" name="imdbId" placeholder="tt1234567" pattern="tt\d{7,10}" maxlength="12" required></label>
+          <label class="field"><span class="eyebrow">Season (optional)</span><input class="input" name="seasonNumber" type="number" min="1" max="50" placeholder="e.g. 1"></label>
+          <label class="field full"><span class="eyebrow">Episodes (optional)</span><input class="input" name="episodeNumbers" placeholder="e.g. 1-5, 8, 10"></label>
+          <div class="landing-ai-note full"><b>Automatic mapping</b><span>Uses the official OpenSubtitles API to download the best English subtitle for each detected episode.</span></div>
+        </div>
+        <div class="row"><button class="btn ghost" id="subtitleImportCancel" type="button">Cancel</button><button class="btn primary" type="submit">Import subtitles</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="library-detail" id="libraryDetail" hidden>
+  <div class="library-detail-card">
+    <button class="library-detail-close" id="libraryDetailClose" type="button">×</button>
+    <div class="library-detail-hero" id="libraryDetailHero"><div class="library-detail-copy"><h2 id="libraryDetailTitle"></h2><p id="libraryDetailSummary"></p></div></div>
+    <div class="library-detail-body"><h3 id="libraryDetailHeading">Episodes</h3><div class="detail-episodes" id="libraryDetailEpisodes"></div></div>
+  </div>
+</div>
+
+<!-- Edit an existing saved episode/movie without re-adding its video. -->
+<div class="netflix-form-overlay" id="episodeEditOverlay" hidden>
+  <div class="netflix-form-card" style="width:min(620px,100%)">
+    <div class="library-form-head"><b id="episodeEditTitle">Edit episode</b><button class="netflix-close" id="episodeEditClose" type="button">×</button></div>
+    <form class="library-form" id="episodeEditForm">
+      <div class="library-form-grid">
+        <div class="landing-ai-note full"><b id="editEpisodeName">Episode</b><span>Change the season/episode number or title of the saved item. The existing video link is kept.</span></div>
+        <label class="field" id="editSeasonField"><span class="eyebrow">Season</span><input class="input" id="editSeason" type="number" min="1" max="99" required></label>
+        <label class="field" id="editEpisodeField"><span class="eyebrow">Episode</span><input class="input" id="editEpisode" type="number" min="1" max="999" required></label>
+        <label class="field full"><span class="eyebrow">Title <small>(optional)</small></span><input class="input" id="editEpisodeTitle" maxlength="120" placeholder="Episode title"></label>
+        <label class="field full checkbox-field"><input type="checkbox" id="editDownloadSubs"><span class="eyebrow">Download subtitles again <small>(OpenSubtitles)</small></span></label>
+        <div class="landing-ai-note full"><b>Subtitle behavior</b><span id="editSubtitleStatus">The existing subtitle will be kept unless you enable re-download.</span></div>
+      </div>
+      <div class="row"><button class="btn ghost" id="episodeEditCancel" type="button">Cancel</button><button class="btn primary" type="submit">Save changes</button></div>
+    </form>
   </div>
 </div>
 
