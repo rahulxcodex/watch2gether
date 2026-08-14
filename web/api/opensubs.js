@@ -151,6 +151,22 @@ async function searchSeason(session, imdbId, season) {
   return getJson(session, `/subtitles?${params}`);
 }
 
+// Movies aren't part of a season/episode tree on OpenSubtitles — they need
+// their own imdb_id + type=movie query. Reusing searchSeason's
+// parent_imdb_id/type=episode params for a movie's IMDb id always returned
+// zero results, since that id was never registered as a TV "parent".
+async function searchMovie(session, imdbId) {
+  const params = new URLSearchParams({
+    imdb_id: imdbNumeric(imdbId),
+    languages: "en",
+    type: "movie",
+    order_by: "download_count",
+    order_direction: "desc",
+    per_page: "60",
+  });
+  return getJson(session, `/subtitles?${params}`);
+}
+
 async function downloadFile(session, candidate) {
   const fileId = candidate.file_id;
   const tries = ["ass", "srt"];
@@ -236,42 +252,63 @@ export default async function handler(req, res) {
   try {
     const session = await login();
     const candidates = new Map();
-    const requestedSeason = Number(req.body?.seasonNumber);
-    const seasons = Number.isInteger(requestedSeason) && requestedSeason >= 1 && requestedSeason <= MAX_SEASONS
-      ? [requestedSeason] : Array.from({ length: MAX_SEASONS }, (_, i) => i + 1);
-    // Optional episode filter (e.g. { episodeNumbers: "1-5,8,10" } or
-    // { episodeNumbers: [1,2,5] }) so a 20+ episode season doesn't force an
-    // all-or-nothing download.
-    const episodeFilter = parseEpisodeSelector(req.body?.episodeNumbers ?? req.body?.episodeNumber);
+    const isMovie = req.body?.movie === true || req.body?.movie === "true";
 
-    for (const season of seasons) {
-      const body = await searchSeason(session, imdbId, season);
+    if (isMovie) {
+      // Single lookup by the movie's own IMDb id — no season/episode tree
+      // to walk.
+      const body = await searchMovie(session, imdbId);
       for (const item of (body.data || [])) {
         const a = item.attributes || {};
-        const feature = a.feature_details || {};
-        const ep = detectEpisode(a.release || a.feature_details?.movie_name, feature);
-        if (ep.season == null || ep.episode == null) continue;
-        if (episodeFilter && !episodeFilter.has(ep.episode)) continue;
         for (const f of (a.files || [])) {
           if (!f?.file_id) continue;
-          const key = `${ep.season}x${ep.episode}`;
-          const candidate = { file_id: Number(f.file_id), file_name: f.file_name || "", subtitle_id: a.subtitle_id || item.id, attributes: a, feature };
+          const key = "movie";
+          const candidate = { file_id: Number(f.file_id), file_name: f.file_name || "", subtitle_id: a.subtitle_id || item.id, attributes: a, feature: a.feature_details || {} };
           const old = candidates.get(key);
           if (!old || scoreSubtitle(candidate.attributes, candidate.file_name) > scoreSubtitle(old.attributes, old.file_name)) candidates.set(key, candidate);
         }
       }
-      // Stop once a season returns no results. This avoids 50 needless API calls
-      // for ordinary shows while still discovering every populated season.
-      if (!(body.data || []).length && season > 1) break;
-      if (candidates.size >= MAX_RESULTS) break;
-    }
+      if (!candidates.size) {
+        return res.status(404).json({ error: "OpenSubtitles API returned no English subtitles for this movie's IMDb ID." });
+      }
+    } else {
+      const requestedSeason = Number(req.body?.seasonNumber);
+      const seasons = Number.isInteger(requestedSeason) && requestedSeason >= 1 && requestedSeason <= MAX_SEASONS
+        ? [requestedSeason] : Array.from({ length: MAX_SEASONS }, (_, i) => i + 1);
+      // Optional episode filter (e.g. { episodeNumbers: "1-5,8,10" } or
+      // { episodeNumbers: [1,2,5] }) so a 20+ episode season doesn't force an
+      // all-or-nothing download.
+      const episodeFilter = parseEpisodeSelector(req.body?.episodeNumbers ?? req.body?.episodeNumber);
 
-    if (!candidates.size) {
-      return res.status(404).json({
-        error: episodeFilter
-          ? `OpenSubtitles API returned no English subtitles for episode(s) ${[...episodeFilter].sort((a,b)=>a-b).join(", ")}.`
-          : "OpenSubtitles API returned no English episode subtitles for this IMDb ID.",
-      });
+      for (const season of seasons) {
+        const body = await searchSeason(session, imdbId, season);
+        for (const item of (body.data || [])) {
+          const a = item.attributes || {};
+          const feature = a.feature_details || {};
+          const ep = detectEpisode(a.release || a.feature_details?.movie_name, feature);
+          if (ep.season == null || ep.episode == null) continue;
+          if (episodeFilter && !episodeFilter.has(ep.episode)) continue;
+          for (const f of (a.files || [])) {
+            if (!f?.file_id) continue;
+            const key = `${ep.season}x${ep.episode}`;
+            const candidate = { file_id: Number(f.file_id), file_name: f.file_name || "", subtitle_id: a.subtitle_id || item.id, attributes: a, feature };
+            const old = candidates.get(key);
+            if (!old || scoreSubtitle(candidate.attributes, candidate.file_name) > scoreSubtitle(old.attributes, old.file_name)) candidates.set(key, candidate);
+          }
+        }
+        // Stop once a season returns no results. This avoids 50 needless API calls
+        // for ordinary shows while still discovering every populated season.
+        if (!(body.data || []).length && season > 1) break;
+        if (candidates.size >= MAX_RESULTS) break;
+      }
+
+      if (!candidates.size) {
+        return res.status(404).json({
+          error: episodeFilter
+            ? `OpenSubtitles API returned no English subtitles for episode(s) ${[...episodeFilter].sort((a,b)=>a-b).join(", ")}.`
+            : "OpenSubtitles API returned no English episode subtitles for this IMDb ID.",
+        });
+      }
     }
 
     const chosen = [...candidates.values()].slice(0, MAX_DOWNLOADS);
