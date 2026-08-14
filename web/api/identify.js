@@ -98,8 +98,9 @@ export default async function handler(req, res) {
       redirect: "follow",
     });
     // Kept small: Groq's free tier has a low tokens-per-minute ceiling, and
-    // large request bodies get rejected with a 413 as a result.
-    if (r.ok) playlistHint = (await r.text()).slice(0, 1500);
+    // groq/compound's own web-search step adds further tokens on top of
+    // whatever we send, so keep our own contribution well under the cap.
+    if (r.ok) playlistHint = (await r.text()).slice(0, 400);
   } catch {}
 
   // JSON Schema for Groq's OpenAI-compatible strict structured-output mode.
@@ -186,6 +187,10 @@ ${playlistHint}`;
     const result = await fetchWithRetry(groqBase, groqHeaders, {
       model: "groq/compound",
       messages: [{ role: "user", content: prompt }],
+      // Caps the response so input + output can't together exceed the
+      // free-tier per-request/per-minute token ceiling (413 request_too_large
+      // is a hard cap, not a transient rate limit, so retrying won't help).
+      max_completion_tokens: 1200,
     });
     if (!result.ok) {
       return res.status(502).json({
@@ -201,7 +206,7 @@ ${playlistHint}`;
     return res.status(502).json({ error: `Groq request failed: ${e?.message || e}` });
   }
   if (!research) return res.status(502).json({ error: "Groq returned no research result." });
-  research = research.slice(0, 6000);
+  research = research.slice(0, 4000);
 
   // openai/gpt-oss-20b:free is the smallest/cheapest OpenRouter free model
   // that still supports strict json_schema structured outputs, so this
