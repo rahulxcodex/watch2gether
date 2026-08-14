@@ -458,9 +458,17 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
                 <span class="eyebrow">IMDb ID</span>
                 <input class="input" name="imdbId" placeholder="tt1234567" pattern="tt\d{7,10}" maxlength="12" required>
               </label>
+              <label class="field">
+                <span class="eyebrow">Season (optional)</span>
+                <input class="input" name="seasonNumber" type="number" min="1" max="50" placeholder="e.g. 1">
+              </label>
+              <label class="field full">
+                <span class="eyebrow">Episodes (optional)</span>
+                <input class="input" name="episodeNumbers" placeholder="e.g. 1-5, 8, 10  (leave blank for all episodes in the season)">
+              </label>
               <div class="landing-ai-note" style="align-self:end">
                 <b>Automatic mapping</b>
-                <span>Uses the official OpenSubtitles API to download the best English subtitle for each detected episode, preferring ASS and falling back to SRT. The pasted .org URL is used as the source/identity input; API credentials stay on the server.</span>
+                <span>Uses the official OpenSubtitles API to download the best English subtitle for each detected episode, preferring ASS and falling back to SRT. The pasted .org URL is used as the source/identity input; API credentials stay on the server. For seasons with 20+ episodes, use the season and episode fields to pull only what you need instead of the whole season at once.</span>
               </div>
             </div>
             <div class="row">
