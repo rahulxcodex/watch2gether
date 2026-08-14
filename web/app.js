@@ -423,11 +423,15 @@ function renderLanding() {
             </div>
             ${series.summary ? `<p class="library-summary">${esc(series.summary)}</p>` : ""}
           </div>
-          <button class="library-delete-series" type="button">Delete series</button>
+          <div class="library-series-actions">
+            <button class="library-add-episode" type="button">+ Add episode</button>
+            <button class="library-delete-series" type="button">Delete series</button>
+          </div>
         </div>
         <div class="library-episodes"></div>`;
 
       card.querySelector(".library-delete-series").onclick = () => deleteLibrarySeries(series.id);
+      card.querySelector(".library-add-episode").onclick = () => openLibraryForm(series.name);
       const list = card.querySelector(".library-episodes");
 
       for (const ep of series.episodes) {
@@ -524,10 +528,60 @@ $("#gate").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.tagName !== "BUTTON") join();
 });
 
+/* Fills the "Series" dropdown with every series already in the library, so
+ * adding another episode doesn't require retyping (and possibly misspelling
+ * — which would silently create a second, duplicate series) a name you've
+ * already entered once. "+ New series" stays first and is the default. */
+function populateSeriesSelect(selectName) {
+  const sel = $("#librarySeriesSelect");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">+ New series</option>';
+  for (const series of MY_LIBRARY) {
+    const opt = document.createElement("option");
+    opt.value = series.name;
+    opt.textContent = series.name;
+    sel.appendChild(opt);
+  }
+  sel.value = selectName && findSeries(selectName) ? selectName : "";
+  syncSeriesFields();
+}
+
+/* Existing series picked -> hide/unrequire the free-text name field and
+ * carry the picked name over to it (addLibraryEpisode still just reads
+ * form field "series", so nothing downstream needs to change).
+ * "+ New series" picked -> show the field and make it required again. */
+function syncSeriesFields() {
+  const sel = $("#librarySeriesSelect");
+  const field = $("#newSeriesField");
+  const input = $("#librarySeries");
+  if (!sel || !field || !input) return;
+  if (sel.value) {
+    field.hidden = true;
+    input.required = false;
+    input.value = sel.value;
+  } else {
+    field.hidden = false;
+    input.required = true;
+  }
+}
+
+function openLibraryForm(seriesName) {
+  populateSeriesSelect(seriesName);
+  $("#libraryFormWrap").hidden = false;
+  // When opened from a specific series' "+ Add episode" button, that series
+  // is already picked and its name field is hidden — so send focus straight
+  // to the episode link instead of a hidden input.
+  const target = (seriesName && findSeries(seriesName))
+    ? $("#libraryForm").querySelector('[name="url"]')
+    : $("#librarySeries");
+  target?.focus();
+}
+
 $("#landingAddBtn").onclick = () => {
-  $("#libraryFormWrap").hidden = !$("#libraryFormWrap").hidden;
-  if (!$("#libraryFormWrap").hidden) $("#librarySeries").focus();
+  if ($("#libraryFormWrap").hidden) openLibraryForm();
+  else $("#libraryFormWrap").hidden = true;
 };
+$("#librarySeriesSelect").onchange = syncSeriesFields;
 $("#landingJoinBtn").onclick = () => showGate();
 $("#homeBtn").onclick = () => {
   location.hash = "";
@@ -544,6 +598,7 @@ $("#libraryForm").addEventListener("submit", (e) => {
 $("#libraryCancel").onclick = () => {
   $("#libraryFormWrap").hidden = true;
   $("#libraryForm").reset();
+  populateSeriesSelect();
 };
 
 if (location.hash.slice(1)) showGate($("#code").value);
