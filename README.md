@@ -102,6 +102,7 @@ web/index.html              markup and styles
 web/app.js                  everything else
 web/config.js               the only file you edit
 HOSTING.md                  where to upload, and what each host costs
+CLOUDFLARE.md               step-by-step R2 setup, no CLI
 firebase/database.rules.json  publish these before sharing the link
 .github/workflows/pages.yml   GitHub Pages deploy
 worker/                     optional: a private R2 library
@@ -112,10 +113,17 @@ tools/prep.sh               optional: transcode + upload helper
 
 ## Uploading your own files
 
-See **[HOSTING.md](HOSTING.md)**. Short version: Cloudflare R2 for anything
-private (10 GB, no bandwidth charge, uploads from inside the app), Internet
-Archive for anything you're allowed to publish (unlimited), unlisted YouTube if
-you want zero setup.
+See **[HOSTING.md](HOSTING.md)** for the comparison and
+**[CLOUDFLARE.md](CLOUDFLARE.md)** for R2 step by step. Short version: R2 for
+anything private (10 GB, no bandwidth charge, uploads from inside the app),
+Internet Archive for anything you're allowed to publish (unlimited), unlisted
+YouTube if you want zero setup.
+
+**YouTube Premium** carries into the embed if you're signed in to YouTube in the
+same browser — it rides your third-party cookie, so there's nothing to configure.
+Ads are per-viewer, though, so one of you can get a mid-roll the other doesn't.
+The app detects that (YouTube reports the ad's duration instead of the film's)
+and holds sync until it's over rather than chasing a position that doesn't exist.
 
 Firebase can't host video — Cloud Storage requires the Blaze plan and a linked
 card since February 2026, and Firebase Hosting allows 360 MB of transfer a day.
@@ -129,3 +137,12 @@ The R2 Worker deploys from GitHub Actions, so there's still nothing to install.
 Video alongside the voice chat is a two-line change to the `getUserMedia`
 constraints and one more element to render into. Beyond that: a synced queue so
 you can line up several things, and `?list=` playlist support for YouTube.
+
+### OpenSubtitles importer
+
+Set `OPENSUBTITLES_API_KEY`, `OPENSUBTITLES_USERNAME`, and `OPENSUBTITLES_PASSWORD` in the deployment environment. The importer uses the official OpenSubtitles.com API rather than scraping OpenSubtitles.org, so the legacy 403 page block does not prevent subtitle downloads.
+
+
+### LLM metadata providers
+
+Metadata lookup is intentionally minimal to reduce token usage. The server first checks IMDb locally and only calls an LLM when needed. It supports automatic fallback: **Gemini → Grok → OpenRouter**. Configure `GEMINI_API_KEY`, `XAI_API_KEY`, and/or `OPENROUTER_API_KEY`. The order can be changed with `LLM_PROVIDER_ORDER`. See `DEPLOY.md`.
