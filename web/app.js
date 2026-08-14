@@ -887,9 +887,12 @@ async function saveEpisodeEdit(form) {
       });
     }
 
-    writeLibrary();
+    // Close the editor before re-rendering the library. writeLibrary() rebuilds
+    // cards/hero, so waiting until after it can leave a stale overlay reference
+    // on slower browsers.
     $("#episodeEditOverlay").hidden = true;
     const detailWasOpen = !$("#libraryDetail").hidden;
+    writeLibrary();
     if (detailWasOpen) await openLibraryDetail(series);
     const subMsg = downloadAgain && ep.subtitleText ? " · English subtitles updated" : "";
     say(`${series.name} — ${ep.title} · ${newCode} saved${subMsg}`);
@@ -957,29 +960,18 @@ async function fetchJikanAnime(series, force = false) {
         const proxy = await fetch(`/api/tmdb?action=anime&title=${encodeURIComponent(title)}`, { headers: { accept: "application/json" } });
         if (proxy.ok) data = await proxy.json();
       } catch {}
-      let rows = Array.isArray(data?.results) ? data.results : [];
-      if (!rows.length) {
-        const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=8&sfw=true`;
-        const r = await fetch(searchUrl, { headers: { accept: "application/json" } });
-        if (!r.ok) throw new Error(`Jikan search HTTP ${r.status}`);
-        data = await r.json();
-        rows = Array.isArray(data?.data) ? data.data : [];
-      }
-      if (!rows.length) throw new Error("No Jikan match");
+       // Jikan is accessed only through the Vercel proxy.
+       const rows = Array.isArray(data?.results) ? data.results : [];
+       if (!rows.length) throw new Error("No Jikan match");
       const wanted = normalizeTitleKey(title);
       const exact = rows.find(x => normalizeTitleKey(x?.title) === wanted)
         || rows.find(x => normalizeTitleKey(x?.title_english) === wanted)
         || rows.find(x => normalizeTitleKey(x?.title || "").includes(wanted) || wanted.includes(normalizeTitleKey(x?.title || "")))
         || rows[0];
       if (!exact?.mal_id) throw new Error("No Jikan match");
-
-      // One richer request gives us synopsis, score, genres, studios,
-      // producers, characters, aired dates, rank, popularity, etc.
-      let full = exact;
-      try {
-        const fr = await fetch(`https://api.jikan.moe/v4/anime/${exact.mal_id}/full`, { headers: { accept: "application/json" } });
-        if (fr.ok) full = (await fr.json())?.data || exact;
-      } catch {}
+       // Keep the fallback cheap: the search result already contains artwork.
+       // Avoid the extra /full request because Jikan rate limits it aggressively.
+       const full = exact;
 
       const poster = full?.images?.jpg?.large_image_url || full?.images?.jpg?.image_url || exact?.images?.jpg?.large_image_url || null;
       const genres = Array.isArray(full?.genres) ? full.genres.map(g => ({ id: g.mal_id, name: g.name })) : [];
@@ -1035,30 +1027,20 @@ async function fetchJikanEpisodes(series, season = 1) {
   if (JIKAN_CACHE[key]) return JIKAN_CACHE[key];
   try {
     let all = [];
-    try {
-      const proxy = await fetch(`/api/tmdb?action=anime-episodes&malId=${encodeURIComponent(art.malId)}`, { headers: { accept: "application/json" } });
-      if (proxy.ok) {
-        const pd = await proxy.json();
-        if (Array.isArray(pd?.episodes)) all = pd.episodes;
-      }
-    } catch {}
-    if (!all.length) {
-      for (let page = 1; page <= 5; page++) {
-        const r = await fetch(`https://api.jikan.moe/v4/anime/${art.malId}/episodes?page=${page}`, { headers: { accept: "application/json" } });
-        if (!r.ok) break;
-        const d = await r.json();
-        const rows = Array.isArray(d?.data) ? d.data : [];
-        all.push(...rows);
-        if (!d?.pagination?.has_next_page || rows.length === 0) break;
-      }
+    const proxy = await fetch(`/api/tmdb?action=anime-episodes&malId=${encodeURIComponent(art.malId)}`, { headers: { accept: "application/json" } });
+    if (proxy.ok) {
+      const pd = await proxy.json();
+      if (Array.isArray(pd?.episodes)) all = pd.episodes;
     }
     const result = {
       ok: true, source: "jikan", seasonNumber: Number(season),
       episodes: all.map(e => ({
         id: e.mal_id, episodeNumber: e.episode ?? e.mal_id, seasonNumber: Number(season),
         name: e.title || `Episode ${e.episode || e.mal_id || ""}`,
-        overview: e.synopsis || "", airDate: e.aired || null, stillPath: e.images?.jpg?.large_image_url || e.images?.jpg?.image_url || null,
-        stillUrl: e.images?.jpg?.large_image_url || e.images?.jpg?.image_url || null, rating: typeof e.score === "number" ? e.score : null,
+        overview: e.synopsis || "", airDate: e.aired || null,
+        stillPath: e.images?.jpg?.large_image_url || e.images?.jpg?.image_url || null,
+        stillUrl: e.images?.jpg?.large_image_url || e.images?.jpg?.image_url || null,
+        rating: typeof e.score === "number" ? e.score : null,
         voteCount: typeof e.scored_by === "number" ? e.scored_by : null, runtime: null
       }))
     };
@@ -1095,40 +1077,50 @@ async function fetchTmdbArt(series, force = false) {
 
   const request = (async () => {
     try {
-      // Anime-first path: avoids the failing TMDB serverless function for
-      // titles that Jikan can identify exactly (e.g. Kaguya-sama/Howl).
+      const type = mediaTypeOf(series) === "movie" ? "movie" : "tv";
+      const params = new URLSearchParams({ type });
+      if (series.imdbId) params.set("imdbId", series.imdbId);
+      params.set("title", series.name || "");
+
+      // Try TMDB first so series get a real landscape backdrop/poster. If
+      // TMDB is unavailable, fall back to Jikan for anime artwork.
+      let data = null;
+      try {
+        const r = await fetch(`/api/tmdb?${params.toString()}`);
+        data = await r.json().catch(() => ({}));
+        if (!r.ok || !data?.ok) {
+          if (r.status === 503) tmdbUnavailable = true;
+          data = null;
+        }
+      } catch {}
+
+      if (data?.ok && (data.posterPath || data.posterUrl || data.backdropPath || data.backdropUrl)) {
+        TMDB_FAILED.delete(key);
+        TMDB_CACHE[key] = data;
+        saveTmdbCache();
+        return data;
+      }
+
+      // Only pay the extra anime lookup when TMDB did not return usable art.
       const anime = await fetchJikanAnime(series);
       const wanted = normalizeTitleKey(series.name);
       const animeTitle = normalizeTitleKey(anime?.title);
       const animeMatch = anime && (animeTitle === wanted || animeTitle.includes(wanted) || wanted.includes(animeTitle));
       if (animeMatch) {
-        TMDB_CACHE[key] = anime;
+        const fallback = {...anime, backdropUrl: anime.backdropUrl || anime.posterUrl || ""};
+        TMDB_CACHE[key] = fallback;
         saveTmdbCache();
-        return anime;
+        return fallback;
       }
-      const type = mediaTypeOf(series) === "movie" ? "movie" : "tv";
-      const params = new URLSearchParams({ type });
-      if (series.imdbId) params.set("imdbId", series.imdbId);
-      params.set("title", series.name || "");
-      const r = await fetch(`/api/tmdb?${params.toString()}`);
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok || !data?.ok) {
-        if (r.status === 503) tmdbUnavailable = true;
-        TMDB_FAILED.set(key, Date.now());
-        // Prefer direct Jikan for anime because it is public, CORS-enabled,
-        // and does not depend on the failing Vercel TMDB function.
-        const anime = await fetchJikanAnime(series);
-        if (anime) { TMDB_CACHE[key] = anime; saveTmdbCache(); return anime; }
-        return null;
-      }
-      TMDB_FAILED.delete(key);
-      TMDB_CACHE[key] = data;
-      saveTmdbCache();
-      return data;
+      TMDB_FAILED.set(key, Date.now());
+      return null;
     } catch {
       TMDB_FAILED.set(key, Date.now());
       const anime = await fetchJikanAnime(series);
-      if (anime) { TMDB_CACHE[key] = anime; saveTmdbCache(); return anime; }
+      if (anime) {
+        const fallback = {...anime, backdropUrl: anime.backdropUrl || anime.posterUrl || ""};
+        TMDB_CACHE[key] = fallback; saveTmdbCache(); return fallback;
+      }
       return null;
     } finally {
       TMDB_INFLIGHT.delete(key);
@@ -1221,6 +1213,9 @@ function renderInlineEpisode(series, ep, tmdbEp) {
 }
 
 async function openInlineSeries(series) {
+  // Legacy inline expansion is intentionally disabled; the library now uses
+  // one consistent centered detail modal for movies and series.
+  return openLibraryDetail(series);
   const panel = $("#libraryInlineExpand");
   if (!panel) return openLibraryDetail(series);
   if (panel.dataset.seriesId === String(series.id) && !panel.hidden) { panel.hidden = true; panel.innerHTML=""; panel.dataset.seriesId=""; return; }
@@ -1344,7 +1339,8 @@ function titleMeta(series) {
   const count = series.episodes?.length || 0;
   const rating = art?.rating ?? series.imdbRating;
   return [type, series.year || art?.year || "", rating ? `★ ${Number(rating).toFixed(1)}` : "", type === "Series" ? `${count} episode${count === 1 ? "" : "s"}` : ""]
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((x) => String(x));
 }
 
 async function openLibraryDetail(series) {
@@ -1612,15 +1608,26 @@ function renderLanding() {
     const h = activeLibraryTitle;
     const art = tmdbArt(h);
     const back = backdropUrl(art) || posterUrl(art, "w1280");
+    const heroPoster = $("#libraryHeroPoster");
+    const heroPosterWrap = $(".netflix-hero-poster-wrap");
+    const poster = posterUrl(art, "w500") || posterUrl(art);
+    if (heroPoster && heroPosterWrap) {
+      heroPoster.classList.remove("loaded");
+      heroPosterWrap.classList.toggle("is-empty", !poster);
+      heroPoster.onload = () => heroPoster.classList.add("loaded");
+      heroPoster.onerror = () => { heroPosterWrap.classList.add("is-empty"); };
+      heroPoster.src = poster || "";
+      heroPoster.alt = h.name || "";
+    }
     heroTitle.textContent = h.name || "Your library";
     heroSummary.textContent = h.summary || art?.overview || "Pick a title and watch together.";
-    heroMeta.innerHTML = titleMeta(h).map((m, i) => `<span${m.startsWith("★") ? ' class="rating"' : ""}>${esc(m)}</span>`).join("");
+    heroMeta.innerHTML = titleMeta(h).map((m) => `<span${String(m).startsWith("★") ? ' class="rating"' : ""}>${esc(m)}</span>`).join("");
     setBackgroundWithFallback(heroBackdrop, back);
-    $("#libraryHeroWatch").disabled = !(h.episodes || []).some((e) => e.url);
-    $("#libraryHeroWatch").onclick = () => {
-      const ep = (h.episodes || []).find((e) => e.url);
-      if (ep) watchLibraryEpisode(h, ep); else openLibraryDetail(h);
-    };
+    const heroWatch = $("#libraryHeroWatch");
+    const playableHeroEpisode = Array.isArray(h.episodes) ? h.episodes.find((e) => String(e?.url || "").trim()) : null;
+    heroWatch.disabled = false;
+    heroWatch.textContent = playableHeroEpisode ? "▶ Play" : "▶ View";
+    heroWatch.onclick = () => playableHeroEpisode ? watchLibraryEpisode(h, playableHeroEpisode) : openLibraryDetail(h);
     $("#libraryHeroInfo").onclick = () => openLibraryDetail(h);
     if (!art) {
       fetchTmdbArt(h).then((fresh) => { if (fresh) renderLanding(); });
@@ -1631,6 +1638,8 @@ function renderLanding() {
     heroSummary.textContent = "Add a movie or series to build your personal library.";
     heroMeta.innerHTML = "";
     heroBackdrop.style.backgroundImage = "";
+    const emptyHeroPoster = $(".netflix-hero-poster-wrap");
+    if (emptyHeroPoster) emptyHeroPoster.classList.add("is-empty");
     $("#libraryHeroWatch").disabled = true;
     $("#libraryHeroInfo").onclick = () => $("#landingAddBtn").click();
   }
@@ -2753,7 +2762,7 @@ function setSource(src, startAt = 0) {
     subs: Array.isArray(src?.subs) ? src.subs : [],
     subtitleText: String(src?.subtitleText || ""),
     subtitleName: String(src?.subtitleName || ""),
-    playing: false,
+    playing: true,
     pos: Number(startAt || 0),
   };
 
@@ -2918,7 +2927,7 @@ function teardownHls() {
 }
 async function mountHls(url) {
   const canNative = v.canPlayType("application/vnd.apple.mpegurl");
-  if (canNative) { v.src = proxied(url); return; }
+  if (canNative) { v.src = proxied(url); v.load?.(); if (R.state?.playing) v.play().catch(() => {}); return; }
   if (!hlsMod) hlsMod = await import("https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js").catch(() => null);
   const Hls = hlsMod?.default || window.Hls;
   if (!Hls || !Hls.isSupported()) {
@@ -2927,7 +2936,7 @@ async function mountHls(url) {
   }
   const hls = new Hls();
   R.hls = hls;
-  hls.on(Hls.Events.MANIFEST_PARSED, () => drawQuals());
+  hls.on(Hls.Events.MANIFEST_PARSED, () => { drawQuals(); if (R.state?.playing) v.play().catch(() => {}); });
   hls.on(Hls.Events.LEVEL_SWITCHED, () => drawQuals());
   hls.on(Hls.Events.ERROR, (_evt, data) => {
     if (!data?.fatal) return;
@@ -2977,7 +2986,12 @@ function mountSource(s) {
     case "r2": {
       showSurface("file");
       $("#empty").style.display = "none";
+      v.pause();
+      v.removeAttribute("src");
+      v.load?.();
       v.src = s.kind === "r2" ? mediaUrl(s.ref) : s.ref;
+      v.load?.();
+      if (s.playing) v.play().catch(() => {});
       const first = (s.subs || [])[0];
       if (first && !s.subtitleText) pickTrack(first.key);
       break;
