@@ -2612,8 +2612,19 @@ function showSurface(which) {
 
 /* ======================================================== the sync loop */
 
-const SOFT = 0.12, HARD = 1.5, GAIN = 0.35, CAP = 0.14;
+const SOFT = 0.12, HARD = 2.0, GAIN = 0.35, CAP = 0.14;
 const YT_TOL = 0.7;
+
+// A hard seek forces a network read; firing another one before that read has
+// settled just restarts the buffering it was meant to fix. SEEK_COOLDOWN
+// gives a seek time to land before the loop is allowed to issue another, and
+// HARD_STREAK requires the drift to stay big across consecutive ticks before
+// we act on it at all, so a single noisy sample (typical right after a
+// rebuffer) can't trigger a seek on its own.
+const SEEK_COOLDOWN = 3000;
+const HARD_STREAK = 2;
+let lastSeekAt = 0;
+let hardStreak = 0;
 
 setInterval(sync, 1000);
 
@@ -2629,13 +2640,27 @@ function sync() {
     return;                       // don't chase a position inside someone's ad
   }
 
+  // Already rebuffering locally: let it recover on its own rather than
+  // piling a seek on top of a stall. Seeking mid-stall just cancels the
+  // in-flight fetch and restarts it, which is the seek-storm that turns one
+  // hiccup into a long stuck-and-buffering stretch.
+  if (PL.stalled()) {
+    hardStreak = 0;
+    $("#driftVal").textContent = fmtDrift(expectedPos() - PL.time());
+    return;
+  }
+
   const want = expectedPos();
   const drift = want - PL.time();
   $("#driftVal").textContent = fmtDrift(drift);
 
   if (!s.playing) {
+    hardStreak = 0;
     if (!PL.paused()) PL.pause();
-    if (Math.abs(drift) > 0.25) PL.seek(want);
+    if (Math.abs(drift) > 0.25 && Date.now() - lastSeekAt > SEEK_COOLDOWN) {
+      PL.seek(want);
+      lastSeekAt = Date.now();
+    }
     PL.setRate(s.rate);
     return;
   }
@@ -2644,22 +2669,32 @@ function sync() {
     PL.play()?.catch(() => { R.blocked = true; $("#tap").classList.add("on"); });
   }
 
+  if (Date.now() - lastSeekAt < SEEK_COOLDOWN) return; // let the last seek settle
+
   if (PL.kind === "yt") {
     // No fine speed control available, so hold a wider deadband and jump.
-    if (Math.abs(drift) > YT_TOL) PL.seek(want);
+    if (Math.abs(drift) > YT_TOL) { PL.seek(want); lastSeekAt = Date.now(); }
     PL.setRate(s.rate);
     return;
   }
 
   if (Math.abs(drift) > HARD) {
-    PL.seek(want);
-    PL.setRate(s.rate);
-  } else if (Math.abs(drift) > SOFT) {
-    // Behind -> run slightly fast; ahead -> slightly slow. Converges in a few
-    // seconds and stays inaudible as long as the gain is capped.
-    PL.setRate(clamp(s.rate * (1 + clamp(drift * GAIN, -CAP, CAP)), 0.25, 4));
+    // Require the gap to persist across a couple of ticks before seeking:
+    // a single tick right after a stall clears is often stale.
+    if (++hardStreak >= HARD_STREAK) {
+      PL.seek(want);
+      lastSeekAt = Date.now();
+      hardStreak = 0;
+    }
   } else {
-    PL.setRate(s.rate);
+    hardStreak = 0;
+    if (Math.abs(drift) > SOFT) {
+      // Behind -> run slightly fast; ahead -> slightly slow. Converges in a
+      // few seconds and stays inaudible as long as the gain is capped.
+      PL.setRate(clamp(s.rate * (1 + clamp(drift * GAIN, -CAP, CAP)), 0.25, 4));
+    } else {
+      PL.setRate(s.rate);
+    }
   }
 }
 
@@ -3057,7 +3092,15 @@ async function mountHls(url) {
     say("This browser can't play HLS streams (.m3u8).");
     return;
   }
-  const hls = new Hls();
+  // Wider buffer targets than hls.js's defaults: fewer, longer rebuffers beat
+  // frequent short ones, since each one is what was dragging the sync loop
+  // into hard seeks. backBufferLength trims what's already played so this
+  // doesn't grow unbounded on a long film.
+  const hls = new Hls({
+    maxBufferLength: 60,
+    maxMaxBufferLength: 180,
+    backBufferLength: 60,
+  });
   R.hls = hls;
   hls.on(Hls.Events.MANIFEST_PARSED, () => { drawQuals(); if (R.state?.playing) v.play().catch(() => {}); });
   hls.on(Hls.Events.LEVEL_SWITCHED, () => drawQuals());
@@ -3211,9 +3254,23 @@ setInterval(() => {
   $("#buf").style.width = (PL.buffered() * 100).toFixed(1) + "%";
 }, 250);
 
-v.addEventListener("waiting", () => { setStall(true); pushPresence({ stalled: true }); });
-v.addEventListener("playing", () => { setStall(false); pushPresence({ stalled: false }); });
-v.addEventListener("canplay", () => setStall(false));
+// Brief "waiting" blips (a couple hundred ms while a new segment fetches)
+// are normal and recover on their own. Only tell the room about a stall, and
+// let it trigger a pause, once it's actually lasted long enough to matter —
+// otherwise a healthy connection with routine micro-stalls keeps yanking
+// everyone to a pause-and-resync, which is more disruptive than the blips.
+let waitTimer = 0;
+v.addEventListener("waiting", () => {
+  setStall(true);
+  clearTimeout(waitTimer);
+  waitTimer = setTimeout(() => pushPresence({ stalled: true }), 600);
+});
+v.addEventListener("playing", () => {
+  clearTimeout(waitTimer);
+  setStall(false);
+  pushPresence({ stalled: false });
+});
+v.addEventListener("canplay", () => { clearTimeout(waitTimer); setStall(false); });
 v.addEventListener("loadedmetadata", hardSync);
 v.addEventListener("error", () => {
   if (PL.kind !== "file") return;
