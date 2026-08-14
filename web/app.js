@@ -864,6 +864,139 @@ function openLibraryForm(seriesName) {
   target?.focus();
 }
 
+/* Series-name -> IMDb ID autocomplete. Hits /api/imdb-search (a thin proxy
+ * around IMDb's own public suggestion feed, no LLM involved) as the user
+ * types, and lets them pick the right title instead of having to go find
+ * the tt-id by hand. Picking a result auto-fills the IMDb ID field.
+ * Movies and TV series (incl. mini-series) both show up; season handling
+ * stays exactly as before — one IMDb id per series/movie, seasons and
+ * episode numbers are still entered per-episode in the fields below. */
+(function setupImdbAutocomplete() {
+  const input = $("#librarySeries");
+  const box = $("#imdbSuggest");
+  const imdbField = $("#libraryImdbId");
+  const hint = $("#imdbIdHint");
+  if (!input || !box || !imdbField) return;
+
+  let debounceTimer = null;
+  let abortCtrl = null;
+  let items = [];
+  let activeIndex = -1;
+  let lastPickedName = "";
+
+  function hideBox() {
+    box.hidden = true;
+    box.innerHTML = "";
+    activeIndex = -1;
+  }
+
+  function markAutoFilled(on) {
+    if (hint) hint.hidden = !on;
+  }
+
+  function renderItems() {
+    if (!items.length) {
+      box.innerHTML = '<div class="imdb-suggest-empty">No matches on IMDb.</div>';
+      box.hidden = false;
+      return;
+    }
+    box.innerHTML = "";
+    items.forEach((it, i) => {
+      const row = document.createElement("div");
+      row.className = "imdb-suggest-item" + (i === activeIndex ? " active" : "");
+      row.setAttribute("role", "option");
+      const yearText = it.year ? (it.isSeries ? `${it.year}\u2013${it.endYear || ""}` : String(it.year)) : "";
+      row.innerHTML = `
+        ${it.poster ? `<img src="${it.poster}" alt="">` : '<div class="imdb-suggest-item img" style="width:28px;height:40px"></div>'}
+        <div class="imdb-suggest-info">
+          <div class="imdb-suggest-title">${escapeHtml(it.title)}</div>
+          <div class="imdb-suggest-meta">${escapeHtml(yearText)} ${it.id}</div>
+        </div>
+        <span class="imdb-suggest-badge">${escapeHtml(it.typeLabel)}</span>`;
+      row.addEventListener("mousedown", (e) => {
+        // mousedown (not click) so it fires before the input's blur handler.
+        e.preventDefault();
+        pick(it);
+      });
+      box.appendChild(row);
+    });
+    box.hidden = false;
+  }
+
+  async function pick(it) {
+    input.value = it.title;
+    lastPickedName = it.title;
+    hideBox();
+
+    if (it.provider === "imdb" && it.id) {
+      // IMDb suggest results already carry the id — nothing else to fetch.
+      imdbField.value = it.id;
+      markAutoFilled(true);
+      return;
+    }
+
+    // TMDB results only carry a tmdbId; resolve the IMDb id lazily, only
+    // for the one title the user actually picked.
+    imdbField.value = "";
+    imdbField.placeholder = "Looking up IMDb id\u2026";
+    try {
+      const r = await fetch(`/api/imdb-search?resolve=1&tmdbId=${encodeURIComponent(it.tmdbId)}&mediaType=${encodeURIComponent(it.mediaType)}`);
+      const data = await r.json();
+      if (r.ok && data.id) {
+        imdbField.value = data.id;
+        markAutoFilled(true);
+      } else {
+        markAutoFilled(false);
+        imdbField.placeholder = "No IMDb id found \u2014 enter manually";
+      }
+    } catch {
+      markAutoFilled(false);
+      imdbField.placeholder = "Lookup failed \u2014 enter manually";
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  async function search(query) {
+    if (abortCtrl) abortCtrl.abort();
+    abortCtrl = new AbortController();
+    try {
+      const r = await fetch(`/api/imdb-search?q=${encodeURIComponent(query)}`, { signal: abortCtrl.signal });
+      if (!r.ok) { hideBox(); return; }
+      const data = await r.json();
+      // Stale response for an old query — user has typed further since.
+      if (input.value.trim() !== query) return;
+      items = Array.isArray(data.results) ? data.results : [];
+      renderItems();
+    } catch (e) {
+      if (e?.name !== "AbortError") hideBox();
+    }
+  }
+
+  input.addEventListener("input", () => {
+    // Manual edits after a pick mean it's no longer trustworthy as the
+    // auto-filled id for whatever the user is typing now.
+    if (input.value.trim() !== lastPickedName) markAutoFilled(false);
+    const query = input.value.trim();
+    clearTimeout(debounceTimer);
+    if (query.length < 2) { hideBox(); return; }
+    debounceTimer = setTimeout(() => search(query), 280);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (box.hidden || !items.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); renderItems(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); renderItems(); }
+    else if (e.key === "Enter" && activeIndex >= 0) { e.preventDefault(); pick(items[activeIndex]); }
+    else if (e.key === "Escape") { hideBox(); }
+  });
+
+  input.addEventListener("blur", () => setTimeout(hideBox, 120));
+  input.addEventListener("focus", () => { if (items.length && input.value.trim().length >= 2) box.hidden = false; });
+})();
+
 $("#landingImportSubsBtn").onclick = () => {
   $("#subtitleImportWrap").hidden = !$("#subtitleImportWrap").hidden;
   if (!$("#subtitleImportWrap").hidden) $("#subtitleImportForm").querySelector('[name="url"]')?.focus();
