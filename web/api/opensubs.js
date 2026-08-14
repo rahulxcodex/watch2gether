@@ -40,7 +40,14 @@ function assertOpenSubtitlesUrl(value) {
 }
 
 async function osFetch(baseUrl, path, options = {}) {
-  const url = new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).href;
+  // A leading "/" on `path` makes `new URL()` resolve it as absolute from
+  // the domain root, discarding the "/api/v1" in baseUrl entirely — every
+  // call was hitting e.g. https://api.opensubtitles.com/login (404) instead
+  // of https://api.opensubtitles.com/api/v1/login. Strip the leading slash
+  // so it resolves relative to baseUrl's path as intended.
+  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  const rel = path.replace(/^\/+/, "");
+  const url = new URL(rel, base).href;
   const headers = {
     "Api-Key": API_KEY,
     "User-Agent": USER_AGENT,
