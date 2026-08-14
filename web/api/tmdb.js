@@ -9,9 +9,7 @@ async function tmdb(path,params={}){const u=new URL(TMDB_BASE+path);for(const[k,
 function normalize(x,type){if(!x)return null;return {ok:true,source:"tmdb",tmdbId:x.id||null,mediaType:type,posterPath:x.poster_path||null,backdropPath:x.backdrop_path||null,overview:clean(x.overview,1200),rating:typeof x.vote_average==="number"?x.vote_average:null,voteCount:typeof x.vote_count==="number"?x.vote_count:null,year:yearOf(x),title:clean(x.title||x.name),originalTitle:clean(x.original_title||x.original_name),tagline:clean(x.tagline,220),status:clean(x.status,60),runtime:typeof x.runtime==="number"?x.runtime:null,episodeRunTime:Array.isArray(x.episode_run_time)?x.episode_run_time.slice(0,3):[],genres:Array.isArray(x.genres)?x.genres.slice(0,12).map(g=>({id:g.id,name:clean(g.name,60)})):[],seasons:type==="tv"&&Array.isArray(x.seasons)?x.seasons.map(s=>({id:s.id,seasonNumber:s.season_number,name:clean(s.name,120),overview:clean(s.overview,500),airDate:s.air_date||null,episodeCount:s.episode_count||0,posterPath:s.poster_path||null,rating:typeof s.vote_average==="number"?s.vote_average:null,voteCount:typeof s.vote_count==="number"?s.vote_count:null})):[],externalIds:x.external_ids?{imdbId:x.external_ids.imdb_id||null,tvdbId:x.external_ids.tvdb_id||null}:null,credits:x.credits?{cast:Array.isArray(x.credits.cast)?x.credits.cast.slice(0,12).map(c=>({id:c.id,name:clean(c.name,80),character:clean(c.character,100),profilePath:c.profile_path||null})):[],crew:Array.isArray(x.credits.crew)?x.credits.crew.filter(c=>["Director","Writer","Screenplay","Producer"].includes(c.job)).slice(0,12).map(c=>({id:c.id,name:clean(c.name,80),job:clean(c.job,50),profilePath:c.profile_path||null})):[]}:null};}
 async function imdbFallback(title,imdbId,type){
   const q=clean(title); let rows=[];
-  if(imdbId){
-    try{const r=await fetch(`https://v2.sg.media-imdb.com/suggestion/x/${encodeURIComponent(q)}.json?includeVideos=0`,{headers:{accept:"application/json"}});const j=await r.json();rows=Array.isArray(j?.d)?j.d:[];}catch{}
-  } else {try{const r=await fetch(`https://v2.sg.media-imdb.com/suggestion/x/${encodeURIComponent(q)}.json?includeVideos=0`,{headers:{accept:"application/json"}});const j=await r.json();rows=Array.isArray(j?.d)?j.d:[];}catch{}}
+  try{const r=await fetch(`https://v2.sg.media-imdb.com/suggestion/x/${encodeURIComponent(q)}.json?includeVideos=0`,{headers:{accept:"application/json"}});const j=await r.json();rows=Array.isArray(j?.d)?j.d:[];}catch{}
   const exact=rows.find(x=>imdbId&&x?.id===imdbId)||rows.find(x=>String(x?.l||"").toLowerCase()===q.toLowerCase())||rows[0];
   if(!exact)return null;
   const poster=typeof exact?.i?.imageUrl==="string"?exact.i.imageUrl:(typeof exact?.i==="string"?exact.i:null);
@@ -23,8 +21,8 @@ async function fallback(title,imdbId,type){
   const imdb=await imdbFallback(title,imdbId,type);
   const anime=await jikanFallback(title,type);
   if(anime){
-    const a=String(anime.title||"").toLowerCase().replace(/[^a-z0-9]+/g," \`).trim();
-    const b=String(title||"").toLowerCase().replace(/[^a-z0-9]+/g," \`).trim();
+    const a=String(anime.title||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+    const b=String(title||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
     const close=a===b||a.includes(b)||b.includes(a);
     if(close) return {...imdb,...anime,posterUrl:anime.posterUrl||imdb?.posterUrl||null,source:imdb?.posterUrl?"jikan+imdb":"jikan"};
   }
