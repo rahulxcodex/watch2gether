@@ -117,6 +117,9 @@ function mediaTypeOf(series, item = null) {
   if (item?.mediaType === "movie" || series?.mediaType === "movie") return "movie";
   if (item?.mediaType === "series" || series?.mediaType === "series") return "series";
   if (item?.episodeCode === "Movie") return "movie";
+  // Legacy movie entries explicitly used episodeCode=Movie. That is safe
+  // evidence of a movie; missing S/E numbers alone are NOT.
+  if (!item && Array.isArray(series?.episodes) && series.episodes.some(e => e?.mediaType === "movie" || e?.episodeCode === "Movie")) return "movie";
   return "series";
 }
 
@@ -908,6 +911,11 @@ const TMDB_RETRY_MS = 10 * 60 * 1000;
 const TMDB_INFLIGHT = new Map();
 const TMDB_SEASON_FAILED = new Map();
 const TMDB_SEASON_INFLIGHT = new Map();
+const JIKAN_CACHE_KEY = "wtJikanV1";
+let JIKAN_CACHE = readStore(JIKAN_CACHE_KEY, {});
+const JIKAN_INFLIGHT = new Map();
+const JIKAN_FAILED = new Map();
+const JIKAN_RETRY_MS = 15 * 60 * 1000;
 
 function saveTmdbCache() {
   try { localStorage.setItem(TMDB_CACHE_KEY, JSON.stringify(TMDB_CACHE)); } catch {}
@@ -919,6 +927,125 @@ function saveTmdbSeasonCache() {
 function tmdbArt(series) {
   const key = String(series.imdbId || series.name || series.id || "").toLowerCase();
   return TMDB_CACHE[key] || null;
+}
+
+function saveJikanCache() {
+  try { localStorage.setItem(JIKAN_CACHE_KEY, JSON.stringify(JIKAN_CACHE)); } catch {}
+}
+
+function normalizeTitleKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+async function fetchJikanAnime(series, force = false) {
+  const title = String(series?.name || "").trim();
+  if (!title || mediaTypeOf(series) === "movie") {
+    // Movies such as Howl's Moving Castle are also anime and Jikan supports
+    // them; don't exclude them just because Parallel labels them as movies.
+  }
+  const key = `jikan:${normalizeTitleKey(title)}`;
+  if (!force && JIKAN_CACHE[key]) return JIKAN_CACHE[key];
+  const failedAt = JIKAN_FAILED.get(key) || 0;
+  if (!force && failedAt && Date.now() - failedAt < JIKAN_RETRY_MS) return null;
+  if (!force && JIKAN_INFLIGHT.has(key)) return JIKAN_INFLIGHT.get(key);
+
+  const request = (async () => {
+    try {
+      const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=8&sfw=true`;
+      const r = await fetch(searchUrl, { headers: { accept: "application/json" } });
+      if (!r.ok) throw new Error(`Jikan search HTTP ${r.status}`);
+      const data = await r.json();
+      const rows = Array.isArray(data?.data) ? data.data : [];
+      if (!rows.length) throw new Error("No Jikan match");
+      const wanted = normalizeTitleKey(title);
+      const exact = rows.find(x => normalizeTitleKey(x?.title) === wanted)
+        || rows.find(x => normalizeTitleKey(x?.title_english) === wanted)
+        || rows.find(x => normalizeTitleKey(x?.title || "").includes(wanted) || wanted.includes(normalizeTitleKey(x?.title || "")))
+        || rows[0];
+      if (!exact?.mal_id) throw new Error("No Jikan match");
+
+      // One richer request gives us synopsis, score, genres, studios,
+      // producers, characters, aired dates, rank, popularity, etc.
+      let full = exact;
+      try {
+        const fr = await fetch(`https://api.jikan.moe/v4/anime/${exact.mal_id}/full`, { headers: { accept: "application/json" } });
+        if (fr.ok) full = (await fr.json())?.data || exact;
+      } catch {}
+
+      const poster = full?.images?.jpg?.large_image_url || full?.images?.jpg?.image_url || exact?.images?.jpg?.large_image_url || null;
+      const genres = Array.isArray(full?.genres) ? full.genres.map(g => ({ id: g.mal_id, name: g.name })) : [];
+      const studios = Array.isArray(full?.studios) ? full.studios.map(g => ({ id: g.mal_id, name: g.name })) : [];
+      const producers = Array.isArray(full?.producers) ? full.producers.map(g => ({ id: g.mal_id, name: g.name })) : [];
+      const cast = Array.isArray(full?.characters) ? full.characters.slice(0, 12).map(c => ({ id: c?.character?.mal_id, name: c?.character?.name, character: "", profilePath: c?.character?.images?.jpg?.image_url || null })) : [];
+      const result = {
+        ok: true, source: "jikan", provider: "jikan", malId: full.mal_id,
+        mediaType: mediaTypeOf(series) === "movie" ? "movie" : "tv",
+        title: full.title || exact.title || title,
+        originalTitle: full.title_japanese || exact.title_japanese || "",
+        year: full.year || (full.aired?.from ? Number(String(full.aired.from).slice(0,4)) : null),
+        posterUrl: poster, backdropUrl: poster,
+        posterPath: null, backdropPath: null,
+        overview: full.synopsis || "",
+        background: full.background || "",
+        rating: typeof full.score === "number" ? full.score : null,
+        voteCount: typeof full.scored_by === "number" ? full.scored_by : null,
+        rank: typeof full.rank === "number" ? full.rank : null,
+        popularity: typeof full.popularity === "number" ? full.popularity : null,
+        members: typeof full.members === "number" ? full.members : null,
+        favorites: typeof full.favorites === "number" ? full.favorites : null,
+        status: full.status || "",
+        runtimeText: full.duration || "",
+        runtime: null,
+        episodeRunTime: [],
+        genres, studios, producers, credits: { cast, crew: [] },
+        malUrl: full.url || exact.url || null,
+        airedFrom: full.aired?.from || null,
+        airedTo: full.aired?.to || null,
+        episodesTotal: full.episodes || exact.episodes || null,
+        seasons: []
+      };
+      JIKAN_CACHE[key] = result;
+      saveJikanCache();
+      JIKAN_FAILED.delete(key);
+      return result;
+    } catch (e) {
+      JIKAN_FAILED.set(key, Date.now());
+      return null;
+    } finally {
+      JIKAN_INFLIGHT.delete(key);
+    }
+  })();
+  JIKAN_INFLIGHT.set(key, request);
+  return request;
+}
+
+async function fetchJikanEpisodes(series, season = 1) {
+  const art = await fetchJikanAnime(series);
+  if (!art?.malId) return null;
+  const key = `jikan-episodes:${art.malId}`;
+  if (JIKAN_CACHE[key]) return JIKAN_CACHE[key];
+  try {
+    let all = [];
+    for (let page = 1; page <= 5; page++) {
+      const r = await fetch(`https://api.jikan.moe/v4/anime/${art.malId}/episodes?page=${page}`, { headers: { accept: "application/json" } });
+      if (!r.ok) break;
+      const d = await r.json();
+      const rows = Array.isArray(d?.data) ? d.data : [];
+      all.push(...rows);
+      if (!d?.pagination?.has_next_page || rows.length === 0) break;
+    }
+    const result = {
+      ok: true, source: "jikan", seasonNumber: Number(season),
+      episodes: all.map(e => ({
+        id: e.mal_id, episodeNumber: e.episode ?? e.mal_id, seasonNumber: Number(season),
+        name: e.title || `Episode ${e.episode || e.mal_id || ""}`,
+        overview: e.synopsis || "", airDate: e.aired || null, stillPath: e.images?.jpg?.image_url || null,
+        stillUrl: e.images?.jpg?.image_url || null, rating: typeof e.score === "number" ? e.score : null,
+        voteCount: typeof e.scored_by === "number" ? e.scored_by : null, runtime: null
+      }))
+    };
+    JIKAN_CACHE[key] = result; saveJikanCache(); return result;
+  } catch { return null; }
 }
 
 async function fetchLibraryArtworkFallback(series) {
@@ -950,6 +1077,17 @@ async function fetchTmdbArt(series, force = false) {
 
   const request = (async () => {
     try {
+      // Anime-first path: avoids the failing TMDB serverless function for
+      // titles that Jikan can identify exactly (e.g. Kaguya-sama/Howl).
+      const anime = await fetchJikanAnime(series);
+      const wanted = normalizeTitleKey(series.name);
+      const animeTitle = normalizeTitleKey(anime?.title);
+      const animeMatch = anime && (animeTitle === wanted || animeTitle.includes(wanted) || wanted.includes(animeTitle));
+      if (animeMatch) {
+        TMDB_CACHE[key] = anime;
+        saveTmdbCache();
+        return anime;
+      }
       const type = mediaTypeOf(series) === "movie" ? "movie" : "tv";
       const params = new URLSearchParams({ type });
       if (series.imdbId) params.set("imdbId", series.imdbId);
@@ -959,8 +1097,10 @@ async function fetchTmdbArt(series, force = false) {
       if (!r.ok || !data?.ok) {
         if (r.status === 503) tmdbUnavailable = true;
         TMDB_FAILED.set(key, Date.now());
-        const fallback = await fetchLibraryArtworkFallback(series);
-        if (fallback) { TMDB_CACHE[key] = fallback; saveTmdbCache(); return fallback; }
+        // Prefer direct Jikan for anime because it is public, CORS-enabled,
+        // and does not depend on the failing Vercel TMDB function.
+        const anime = await fetchJikanAnime(series);
+        if (anime) { TMDB_CACHE[key] = anime; saveTmdbCache(); return anime; }
         return null;
       }
       TMDB_FAILED.delete(key);
@@ -969,8 +1109,8 @@ async function fetchTmdbArt(series, force = false) {
       return data;
     } catch {
       TMDB_FAILED.set(key, Date.now());
-      const fallback = await fetchLibraryArtworkFallback(series);
-      if (fallback) { TMDB_CACHE[key] = fallback; saveTmdbCache(); return fallback; }
+      const anime = await fetchJikanAnime(series);
+      if (anime) { TMDB_CACHE[key] = anime; saveTmdbCache(); return anime; }
       return null;
     } finally {
       TMDB_INFLIGHT.delete(key);
@@ -983,7 +1123,7 @@ async function fetchTmdbArt(series, force = false) {
 async function fetchTmdbSeason(series, seasonNumber, force = false) {
   const art = tmdbArt(series);
   const tmdbId = art?.tmdbId;
-  if (!tmdbId || mediaTypeOf(series) === "movie") return null;
+  if (!tmdbId || mediaTypeOf(series) === "movie") return fetchJikanEpisodes(series, season);
   const key = `${tmdbId}:s${seasonNumber}`;
   if (!force && TMDB_SEASON_CACHE[key]) return TMDB_SEASON_CACHE[key];
   const failedAt = TMDB_SEASON_FAILED.get(key) || 0;
@@ -1001,7 +1141,7 @@ async function fetchTmdbSeason(series, seasonNumber, force = false) {
       return data;
     } catch {
       TMDB_SEASON_FAILED.set(key, Date.now());
-      return null;
+      return fetchJikanEpisodes(series, season);
     } finally {
       TMDB_SEASON_INFLIGHT.delete(key);
     }
@@ -1270,29 +1410,44 @@ function setupNetflixRows() {
       e.preventDefault();
       row.scrollLeft += e.deltaY;
     }, { passive: false });
-    let down = false, startX = 0, startScroll = 0, moved = false;
+
+    let down = false, startX = 0, startScroll = 0, moved = false, downCard = null;
     row.addEventListener("pointerdown", (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      down = true; moved = false; startX = e.clientX; startScroll = row.scrollLeft;
+      down = true;
+      moved = false;
+      startX = e.clientX;
+      startScroll = row.scrollLeft;
+      downCard = e.target.closest?.(".netflix-card") || null;
       row.classList.add("is-dragging");
-      row.setPointerCapture?.(e.pointerId);
+      // Do NOT call setPointerCapture here. Pointer capture changes the click
+      // target to the row in Chromium and was the reason cards looked dead.
     });
     row.addEventListener("pointermove", (e) => {
       if (!down) return;
       const dx = e.clientX - startX;
-      if (Math.abs(dx) > 5) {
-        moved = true;
-        const el = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".netflix-card");
-        if (el) el.dataset.dragMoved = "1";
-      }
+      if (Math.abs(dx) > 7) moved = true;
       row.scrollLeft = startScroll - dx;
     });
-    const end = () => { down = false; row.classList.remove("is-dragging"); };
-    row.addEventListener("pointerup", end);
-    row.addEventListener("pointercancel", end);
+    row.addEventListener("pointerup", () => {
+      down = false;
+      row.classList.remove("is-dragging");
+      if (moved) {
+        row.dataset.suppressClickUntil = String(Date.now() + 120);
+        moved = false;
+        downCard = null;
+      }
+    });
+    row.addEventListener("pointercancel", () => {
+      down = false;
+      row.classList.remove("is-dragging");
+      moved = false;
+      downCard = null;
+    });
     row.addEventListener("click", (e) => {
-      if (!moved) return;
-      e.preventDefault(); e.stopPropagation(); moved = false;
+      if (Number(row.dataset.suppressClickUntil || 0) > Date.now()) {
+        e.preventDefault(); e.stopPropagation();
+      }
     }, true);
   });
 }
