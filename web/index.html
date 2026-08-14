@@ -373,7 +373,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 .library-series-head{display:flex;justify-content:space-between;align-items:center;padding:15px 17px 9px}
 .library-series-head h3{margin:0 0 4px;font-size:15px;font-weight:500}
 .library-series-head span{font-size:10px;color:var(--dimmer)}
-.library-delete-series,.episode-delete,.room-delete{color:var(--dimmer);font-size:11px;padding:5px 7px}
+.library-series-actions{display:flex;gap:4px;flex-shrink:0}
+.library-delete-series,.library-add-episode,.episode-delete,.room-delete{color:var(--dimmer);font-size:11px;padding:5px 7px}
+.library-add-episode:hover{color:var(--accent,#5EEAD4)}
 .library-delete-series:hover,.episode-delete:hover,.room-delete:hover{color:var(--warn)}
 .library-episode{display:flex;align-items:center;gap:12px;padding:10px 17px 10px 29px;border-top:1px solid var(--line-soft)}
 .episode-meta{min-width:0;flex:1}
@@ -446,6 +448,12 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
           <form id="libraryForm">
             <div class="library-form-grid">
               <label class="field">
+                <span class="eyebrow">Series</span>
+                <select class="input" id="librarySeriesSelect">
+                  <option value="">+ New series</option>
+                </select>
+              </label>
+              <label class="field" id="newSeriesField">
                 <span class="eyebrow">Series name</span>
                 <input class="input" id="librarySeries" name="series" placeholder="Demon Slayer" maxlength="120" required>
               </label>
