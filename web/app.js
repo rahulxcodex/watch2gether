@@ -427,10 +427,16 @@ async function importOpenSubtitles(form) {
   const fd = new FormData(form);
   const url = String(fd.get("url") || "").trim();
   const imdbId = String(fd.get("imdbId") || "").trim().toLowerCase();
+  const seasonRaw = String(fd.get("seasonNumber") || "").trim();
+  const seasonNumber = /^\d+$/.test(seasonRaw) ? Number(seasonRaw) : undefined;
+  const episodeNumbers = String(fd.get("episodeNumbers") || "").trim() || undefined;
   if (!/^https?:\/\/(?:www\.)?opensubtitles\.org\//i.test(url)) {
     return say("Paste an OpenSubtitles.org search page URL.");
   }
   if (!/^tt\d{7,10}$/i.test(imdbId)) return say("Enter a valid IMDb ID such as tt1234567.");
+  if (episodeNumbers && seasonNumber === undefined) {
+    return say("Pick a season number too when specifying which episodes to import.");
+  }
 
   const submit = form.querySelector('button[type="submit"]');
   const oldText = submit?.textContent;
@@ -440,7 +446,7 @@ async function importOpenSubtitles(form) {
     const r = await fetch("/api/opensubs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url, imdbId }),
+      body: JSON.stringify({ url, imdbId, seasonNumber, episodeNumbers }),
     });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return say(body.error || "OpenSubtitles import failed.");
