@@ -1397,7 +1397,12 @@ async function openLibraryDetail(series) {
     content.innerHTML="";
     const head=document.createElement("div"); head.className="inline-season-head";
     const h=document.createElement("h4"); h.textContent=tmdbSeason?.name || `Season ${season}`;
-    const sp=document.createElement("span"); sp.textContent=[tmdbSeason?.episodeCount?`${tmdbSeason.episodeCount} episodes`:"",tmdbSeason?.rating!=null?`★ ${Number(tmdbSeason.rating).toFixed(1)}`:"",tmdbSeason?.voteCount?`${Number(tmdbSeason.voteCount).toLocaleString()} votes":""].filter(Boolean).join(" · ");
+    const seasonMeta = [];
+    if (tmdbSeason?.episodeCount) seasonMeta.push(`${tmdbSeason.episodeCount} episodes`);
+    if (tmdbSeason?.rating != null) seasonMeta.push(`★ ${Number(tmdbSeason.rating).toFixed(1)}`);
+    if (tmdbSeason?.voteCount) seasonMeta.push(`${Number(tmdbSeason.voteCount).toLocaleString()} votes`);
+    const sp=document.createElement("span");
+    sp.textContent=seasonMeta.join(" · ");
     head.append(h,sp); content.appendChild(head);
     const grid=document.createElement("div"); grid.className="detail-episodes"; content.appendChild(grid);
     if(!merged.length){grid.innerHTML='<div class="inline-loading">No episodes found for this season.</div>';return;}
