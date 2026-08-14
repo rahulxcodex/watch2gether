@@ -221,6 +221,7 @@ async function watchLibraryEpisode(series, ep) {
     ref: episodeUrl,
     title: `${series.name} — ${ep.title || parsed.title || "Episode"}`,
     label: "Library",
+    episodeId: ep.id,
     subs: ep.subtitleText
       ? [{ key: "local", label: ep.subtitleLanguage || "English" }]
       : (ep.subtitleUrl ? [{ key: ep.subtitleUrl, label: ep.subtitleLanguage || "English" }] : []),
@@ -803,7 +804,10 @@ async function join() {
   $("#app").classList.add("on");
   $("#roomName").textContent = code;
 
-  rememberRoom(code, { name });
+  rememberRoom(code, {
+    name,
+    ...(R.pendingSource?.episodeId ? { episodeId: R.pendingSource.episodeId } : {}),
+  });
   writeRooms();
 
   restoreLook();
