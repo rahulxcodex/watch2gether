@@ -285,7 +285,17 @@ function showGate(code = "") {
 
 function openRoom(code) {
   $("#code").value = code;
-  showGate(code);
+  // Resuming a saved room, or opening one from the landing list, should
+  // behave like Continue Watching: if a name is already saved, go straight
+  // back in rather than parking the person on the gate screen again to
+  // press Enter a second time. Only show the gate itself if there's no name
+  // yet to sign in with.
+  if (($("#who").value || "").trim()) {
+    showGate(code);
+    join();
+  } else {
+    showGate(code);
+  }
 }
 
 async function watchLibraryEpisode(series, ep) {
@@ -2247,11 +2257,18 @@ async function join() {
   });
   writeRooms();
 
-  restoreLook();
-  wireRoom();
-  wireShelf();
-  wireSharedLibrary();
-  if (CFG.API) { $("#addBtn").hidden = false; loadLibrary(); }
+  try {
+    restoreLook();
+    wireRoom();
+    wireShelf();
+    wireSharedLibrary();
+    if (CFG.API) { $("#addBtn").hidden = false; loadLibrary(); }
+  } catch (e) {
+    // The gate is already hidden and the room is already joined at this
+    // point — this only sets up local UI listeners. Report it rather than
+    // leaving the app half-initialized with no explanation.
+    say("Something didn't load correctly: " + (e.message || e));
+  }
 
   const pending = R.pendingSource;
   R.pendingSource = null;
