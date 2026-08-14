@@ -20,7 +20,12 @@ const MAX_SEASONS = 50;
 const MAX_RESULTS = 500;
 const MAX_DOWNLOADS = 120;
 const CONCURRENCY = 2;
-const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
+// Kept in sync with web/api/subtitle.js, the client-side upload cap in
+// web/app.js, and the firebase/database.rules.json subtitleText limit.
+// This used to be 2MB while the other three were 1.5MB, so a subtitle
+// between 1.5MB and 2MB would download fine here and then get silently
+// rejected by the Firebase write with no error shown to the user.
+const MAX_SUBTITLE_BYTES = 1500000;
 const SUBTITLE_EXT = /\.(ass|ssa|srt|vtt)$/i;
 
 function validImdb(value) { return /^tt\d{7,10}$/i.test(String(value || "").trim()); }
