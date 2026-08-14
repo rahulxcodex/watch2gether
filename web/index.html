@@ -368,6 +368,16 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 .continue-card{margin:14px;padding:14px;border:1px solid rgba(94,234,212,.28);background:rgba(94,234,212,.06);border-radius:11px;display:flex;justify-content:space-between;align-items:center;gap:15px}
 .continue-card b{display:block;font-size:14px;margin:5px 0}
 .continue-card small{display:block;color:var(--dimmer);font-family:var(--mono);font-size:10px}
+.imdb-suggest{position:absolute;top:100%;left:0;right:0;z-index:20;margin-top:4px;background:var(--panel,#181818);border:1px solid var(--line-soft);border-radius:8px;max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.imdb-suggest-item{display:flex;align-items:center;gap:9px;padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--line-soft)}
+.imdb-suggest-item:last-child{border-bottom:0}
+.imdb-suggest-item:hover,.imdb-suggest-item.active{background:rgba(255,255,255,.06)}
+.imdb-suggest-item img{width:28px;height:40px;object-fit:cover;border-radius:3px;background:#222;flex-shrink:0}
+.imdb-suggest-item .imdb-suggest-info{min-width:0;flex:1}
+.imdb-suggest-item .imdb-suggest-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imdb-suggest-item .imdb-suggest-meta{font-size:10px;color:var(--dimmer)}
+.imdb-suggest-item .imdb-suggest-badge{font-size:9px;padding:2px 6px;border-radius:20px;border:1px solid var(--line-soft);color:var(--dimmer);flex-shrink:0}
+.imdb-suggest-empty{padding:9px 10px;font-size:11px;color:var(--dimmer)}
 .library-series{border-bottom:1px solid var(--line-soft)}
 .library-series:last-child{border-bottom:0}
 .library-series-head{display:flex;justify-content:space-between;align-items:center;padding:15px 17px 9px}
@@ -487,13 +497,14 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
                   <option value="">+ New series</option>
                 </select>
               </label>
-              <label class="field" id="newSeriesField">
+              <label class="field" id="newSeriesField" style="position:relative">
                 <span class="eyebrow">Series name</span>
-                <input class="input" id="librarySeries" name="series" placeholder="Demon Slayer" maxlength="120" required>
+                <input class="input" id="librarySeries" name="series" placeholder="Demon Slayer" maxlength="120" autocomplete="off" required>
+                <div class="imdb-suggest" id="imdbSuggest" hidden></div>
               </label>
               <label class="field">
-                <span class="eyebrow">IMDb ID</span>
-                <input class="input" name="imdbId" placeholder="tt1234567" pattern="tt\d{7,10}" maxlength="12" required>
+                <span class="eyebrow">IMDb ID <small id="imdbIdHint" hidden>· auto-filled</small></span>
+                <input class="input" name="imdbId" id="libraryImdbId" placeholder="tt1234567 (auto-fills as you type the name)" pattern="tt\d{7,10}" maxlength="12" required>
               </label>
               <label class="field">
                 <span class="eyebrow">Season</span>
