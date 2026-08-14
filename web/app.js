@@ -277,16 +277,24 @@ async function addLibraryEpisode(form) {
   const episodeOverride = String(fd.get("episode") || "").trim();
   const url = String(fd.get("url") || "").trim();
   const imdbId = String(fd.get("imdbId") || "").trim().toLowerCase();
+  const seasonRaw = String(fd.get("seasonNumber") || "").trim();
+  const episodeRaw = String(fd.get("episodeNumber") || "").trim();
+  const season = /^\d+$/.test(seasonRaw) ? Number(seasonRaw) : null;
+  const epNo = /^\d+$/.test(episodeRaw) ? Number(episodeRaw) : null;
   const subtitleUrl = String(fd.get("subtitleUrl") || "").trim();
   const subtitleFile = fd.get("subtitleFile");
 
   if (!seriesName) return say("Enter a series name.");
   if (!/^tt\d{7,10}$/i.test(imdbId)) return say("Enter a valid IMDb ID such as tt1234567.");
+  if (season == null || season < 1) return say("Enter a valid season number.");
+  if (epNo == null || epNo < 1) return say("Enter a valid episode number.");
   if (!url || !/^https?:\/\//i.test(url)) return say("Enter a valid http(s) episode URL.");
   if (!parseSource(url)) return say("That doesn't look like a playable video or HLS URL.");
   if (subtitleUrl && !/^https?:\/\//i.test(subtitleUrl)) return say("Subtitle URL must start with http:// or https://.");
   if (subtitleUrl && subtitleFile?.size) return say("Use either a subtitle URL or an uploaded subtitle file, not both.");
   if (subtitleFile?.size > 1500000) return say("Subtitle file is larger than 1.5 MB.");
+
+  const generatedCode = `S${String(season).padStart(2, "0")}E${String(epNo).padStart(2, "0")}`;
 
   const submit = form.querySelector('button[type="submit"]');
   const oldText = submit?.textContent;
@@ -319,6 +327,44 @@ async function addLibraryEpisode(form) {
       if (!parseSubs(subtitleText).length) {
         return say("The subtitle URL was fetched, but it doesn't contain readable subtitle cues.");
       }
+    } else {
+      // No subtitle was pasted/uploaded by hand — season, episode number and
+      // IMDb id were already typed into the form, so there's no need to wait
+      // on /api/identify first: go straight to OpenSubtitles for the exact
+      // episode. Falls back to asking the user to upload a file if that
+      // download comes up empty.
+      if (submit) submit.textContent = "Finding subtitles…";
+      const auto = await autoImportEpisodeSubtitle(imdbId, season, epNo);
+      if (auto.ok) {
+        subtitleText = auto.text;
+        subtitleFileName = auto.fileName;
+        subtitleSource = "OpenSubtitles (auto)";
+      } else {
+        const wantsManual = await ask({
+          title: "No subtitles found",
+          body: `Automatic OpenSubtitles lookup for ${generatedCode} didn't work: ${auto.error} Manually choose a subtitle file instead?`,
+          input: false,
+          ok: "Choose file",
+        });
+        if (wantsManual) {
+          if (submit) submit.textContent = "Waiting for file…";
+          const file = await pickSubtitleFile();
+          if (file) {
+            if (file.size > 1500000) {
+              say("Subtitle file is larger than 1.5 MB — skipped.");
+            } else {
+              const manualText = await file.text();
+              if (!parseSubs(manualText).length) {
+                say("That subtitle file doesn't contain readable SRT/VTT/ASS/SSA cues — skipped.");
+              } else {
+                subtitleText = manualText;
+                subtitleFileName = file.name;
+                subtitleSource = "Uploaded subtitle file";
+              }
+            }
+          }
+        }
+      }
     }
 
     if (submit) submit.textContent = "Finding episode…";
@@ -335,7 +381,7 @@ async function addLibraryEpisode(form) {
       meta = body;
     } catch (e) {
       meta = {
-        series: seriesName, seasonNumber: null, episodeNumber: null, episodeCode: "",
+        series: seriesName, seasonNumber: season, episodeNumber: epNo, episodeCode: generatedCode,
         episodeTitle: "", confidence: "low", seriesYear: null, seriesImdbId: null,
         seriesImdbUrl: null, seriesImdbRating: null, seriesGenres: [], seriesSummary: "",
         episodeImdbId: null, episodeImdbUrl: null, episodeImdbRating: null,
@@ -345,10 +391,9 @@ async function addLibraryEpisode(form) {
     }
 
     const resolvedSeries = String(meta.series || seriesName).trim() || seriesName;
-    const season = Number.isInteger(meta.seasonNumber) ? meta.seasonNumber : null;
-    const epNo = Number.isInteger(meta.episodeNumber) ? meta.episodeNumber : null;
-    const generatedCode = meta.episodeCode ||
-      (season != null && epNo != null ? `S${String(season).padStart(2, "0")}E${String(epNo).padStart(2, "0")}` : "");
+    // Season/episode number and code come from what was typed into the form,
+    // not from the identify step — the user already told us exactly which
+    // episode this is, so identify's guess never overrides it.
     const title = episodeOverride ||
       [generatedCode, String(meta.episodeTitle || "").trim()].filter(Boolean).join(" · ") ||
       `Episode ${((findSeries(resolvedSeries)?.episodes.length || 0) + 1)}`;
@@ -376,9 +421,7 @@ async function addLibraryEpisode(form) {
     }
 
     const duplicate = series.episodes.find((e) => e.url === url) ||
-      (season != null && epNo != null
-        ? series.episodes.find((e) => !e.url && e.seasonNumber === season && e.episodeNumber === epNo)
-        : null);
+      series.episodes.find((e) => !e.url && e.seasonNumber === season && e.episodeNumber === epNo);
     const episodePatch = {
       url,
       title, seasonNumber: season, episodeNumber: epNo, episodeCode: generatedCode,
@@ -416,12 +459,81 @@ async function addLibraryEpisode(form) {
     writeLibrary();
     form.reset();
     $("#libraryFormWrap").hidden = true;
-    say(subtitleText ? `${series.name} — ${ep.title} · English subtitles saved` : `${series.name} — ${ep.title} · added`);
+    const subMsg = subtitleSource === "OpenSubtitles (auto)"
+      ? "English subtitles auto-downloaded from OpenSubtitles"
+      : subtitleText ? "English subtitles saved" : "";
+    say(subMsg ? `${series.name} — ${ep.title} · ${subMsg}` : `${series.name} — ${ep.title} · added`);
   } finally {
     if (submit) { submit.disabled = false; submit.textContent = oldText || "Analyze & add"; }
   }
 }
 
+
+/* Best-effort automatic subtitle fetch for a single episode being added via
+ * the "Analyze & add" form. Reuses the existing /api/opensubs endpoint (the
+ * same one the bulk "Import OpenSubtitles" form uses) filtered down to one
+ * season/episode, so a user pasting just an episode link + IMDb id gets
+ * subtitles without ever visiting OpenSubtitles themselves. The endpoint
+ * only validates that `url` looks like an opensubtitles.org link — the
+ * actual lookup happens server-side via the IMDb id — so a search-page URL
+ * is synthesized here rather than asked of the user. */
+async function autoImportEpisodeSubtitle(imdbId, season, episodeNumber) {
+  try {
+    const r = await fetch("/api/opensubs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url: `https://www.opensubtitles.org/en/search/imdbid-${imdbId.replace(/^tt/i, "")}`,
+        imdbId,
+        seasonNumber: season,
+        episodeNumbers: String(episodeNumber),
+      }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, error: body.error || `OpenSubtitles API returned HTTP ${r.status}.` };
+    const file = Array.isArray(body.files)
+      ? (body.files.find((f) => f.season === season && f.episode === episodeNumber) || body.files[0])
+      : null;
+    if (!file || !String(file.text || "").trim()) {
+      return { ok: false, error: body.error || "No English subtitle was found for this episode." };
+    }
+    return {
+      ok: true,
+      text: String(file.text),
+      fileName: String(file.fileName || `S${String(season).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}.srt`).slice(-180),
+    };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+/* Opens a native file picker without needing a permanent <input> in the DOM,
+ * so it can be triggered on demand after the automatic subtitle download
+ * fails. Resolves with the chosen File, or null if the user cancels. There's
+ * no native "cancel" event on <input type=file>, so cancellation is detected
+ * by watching for the window regaining focus without a change event having
+ * fired first. */
+function pickSubtitleFile() {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".srt,.vtt,.ass,.ssa,text/vtt,application/x-subrip";
+    input.style.display = "none";
+    let settled = false;
+    const finish = (file) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("focus", onFocus, true);
+      input.remove();
+      resolve(file || null);
+    };
+    const onFocus = () => setTimeout(() => finish(input.files?.[0] || null), 300);
+    input.onchange = () => finish(input.files?.[0] || null);
+    window.addEventListener("focus", onFocus, true);
+    document.body.appendChild(input);
+    input.click();
+  });
+}
 
 async function importOpenSubtitles(form) {
   const fd = new FormData(form);
