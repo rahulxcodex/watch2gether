@@ -951,11 +951,19 @@ async function fetchJikanAnime(series, force = false) {
 
   const request = (async () => {
     try {
-      const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=8&sfw=true`;
-      const r = await fetch(searchUrl, { headers: { accept: "application/json" } });
-      if (!r.ok) throw new Error(`Jikan search HTTP ${r.status}`);
-      const data = await r.json();
-      const rows = Array.isArray(data?.data) ? data.data : [];
+      let data = null;
+      try {
+        const proxy = await fetch(`/api/tmdb?action=anime&title=${encodeURIComponent(title)}`, { headers: { accept: "application/json" } });
+        if (proxy.ok) data = await proxy.json();
+      } catch {}
+      let rows = Array.isArray(data?.results) ? data.results : [];
+      if (!rows.length) {
+        const searchUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title)}&limit=8&sfw=true`;
+        const r = await fetch(searchUrl, { headers: { accept: "application/json" } });
+        if (!r.ok) throw new Error(`Jikan search HTTP ${r.status}`);
+        data = await r.json();
+        rows = Array.isArray(data?.data) ? data.data : [];
+      }
       if (!rows.length) throw new Error("No Jikan match");
       const wanted = normalizeTitleKey(title);
       const exact = rows.find(x => normalizeTitleKey(x?.title) === wanted)
@@ -1026,21 +1034,30 @@ async function fetchJikanEpisodes(series, season = 1) {
   if (JIKAN_CACHE[key]) return JIKAN_CACHE[key];
   try {
     let all = [];
-    for (let page = 1; page <= 5; page++) {
-      const r = await fetch(`https://api.jikan.moe/v4/anime/${art.malId}/episodes?page=${page}`, { headers: { accept: "application/json" } });
-      if (!r.ok) break;
-      const d = await r.json();
-      const rows = Array.isArray(d?.data) ? d.data : [];
-      all.push(...rows);
-      if (!d?.pagination?.has_next_page || rows.length === 0) break;
+    try {
+      const proxy = await fetch(`/api/tmdb?action=anime-episodes&malId=${encodeURIComponent(art.malId)}`, { headers: { accept: "application/json" } });
+      if (proxy.ok) {
+        const pd = await proxy.json();
+        if (Array.isArray(pd?.episodes)) all = pd.episodes;
+      }
+    } catch {}
+    if (!all.length) {
+      for (let page = 1; page <= 5; page++) {
+        const r = await fetch(`https://api.jikan.moe/v4/anime/${art.malId}/episodes?page=${page}`, { headers: { accept: "application/json" } });
+        if (!r.ok) break;
+        const d = await r.json();
+        const rows = Array.isArray(d?.data) ? d.data : [];
+        all.push(...rows);
+        if (!d?.pagination?.has_next_page || rows.length === 0) break;
+      }
     }
     const result = {
       ok: true, source: "jikan", seasonNumber: Number(season),
       episodes: all.map(e => ({
         id: e.mal_id, episodeNumber: e.episode ?? e.mal_id, seasonNumber: Number(season),
         name: e.title || `Episode ${e.episode || e.mal_id || ""}`,
-        overview: e.synopsis || "", airDate: e.aired || null, stillPath: e.images?.jpg?.image_url || null,
-        stillUrl: e.images?.jpg?.image_url || null, rating: typeof e.score === "number" ? e.score : null,
+        overview: e.synopsis || "", airDate: e.aired || null, stillPath: e.images?.jpg?.large_image_url || e.images?.jpg?.image_url || null,
+        stillUrl: e.images?.jpg?.large_image_url || e.images?.jpg?.image_url || null, rating: typeof e.score === "number" ? e.score : null,
         voteCount: typeof e.scored_by === "number" ? e.scored_by : null, runtime: null
       }))
     };
@@ -1123,7 +1140,7 @@ async function fetchTmdbArt(series, force = false) {
 async function fetchTmdbSeason(series, seasonNumber, force = false) {
   const art = tmdbArt(series);
   const tmdbId = art?.tmdbId;
-  if (!tmdbId || mediaTypeOf(series) === "movie") return fetchJikanEpisodes(series, season);
+  if (!tmdbId || mediaTypeOf(series) === "movie") return fetchJikanEpisodes(series, seasonNumber);
   const key = `${tmdbId}:s${seasonNumber}`;
   if (!force && TMDB_SEASON_CACHE[key]) return TMDB_SEASON_CACHE[key];
   const failedAt = TMDB_SEASON_FAILED.get(key) || 0;
@@ -1224,9 +1241,16 @@ async function openInlineSeries(series) {
   tabs.innerHTML="";
   const renderSeason = async (season) => {
     tabs.querySelectorAll(".season-tab").forEach(b=>b.classList.toggle("active", Number(b.dataset.season)===Number(season)));
-    content.innerHTML='<div class="inline-loading">Loading season details and episode ratings from TMDB…</div>';
+    content.innerHTML='<div class="inline-loading">Loading season details and episode ratings…</div>';
     const tmdbSeason = await fetchTmdbSeason(series, season);
-    const local = localEpisodesForSeason(series, season);
+    let local = localEpisodesForSeason(series, season);
+    if (Number(season) === 1 && local.length < (series.episodes || []).length) {
+      const explicitSeasons = (series.episodes || []).map(e => Number(e.seasonNumber)).filter(n => Number.isInteger(n) && n > 0);
+      if (new Set(explicitSeasons).size <= 1) {
+        const unnumbered = (series.episodes || []).filter(e => e.seasonNumber == null);
+        local = [...local, ...unnumbered].sort((a,b) => (a.episodeNumber || 9999) - (b.episodeNumber || 9999));
+      }
+    }
     const tmdbEpisodes = tmdbSeason?.episodes || [];
     const merged = [];
     const max = Math.max(local.length, tmdbEpisodes.length);
