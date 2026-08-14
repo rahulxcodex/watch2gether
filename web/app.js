@@ -9,6 +9,8 @@
  * of JSON that both browsers subscribe to.
  * ======================================================================== */
 
+const APP_BUILD = "20260814-4";
+
 import { firebaseConfig, CFG } from "./config.js";
 
 const SDK = firebaseConfig.sdkVersion || "11.0.2";
@@ -917,6 +919,9 @@ const TMDB_SEASON_FAILED = new Map();
 const TMDB_SEASON_INFLIGHT = new Map();
 const JIKAN_CACHE_KEY = "wtJikanV1";
 let JIKAN_CACHE = readStore(JIKAN_CACHE_KEY, {});
+const ANILIST_CACHE_KEY = "wtAniListV1";
+let ANILIST_CACHE = readStore(ANILIST_CACHE_KEY, {});
+function saveAniListCache() { try { localStorage.setItem(ANILIST_CACHE_KEY, JSON.stringify(ANILIST_CACHE)); } catch {} }
 const JIKAN_INFLIGHT = new Map();
 const JIKAN_FAILED = new Map();
 const JIKAN_RETRY_MS = 15 * 60 * 1000;
@@ -939,6 +944,77 @@ function saveJikanCache() {
 
 function normalizeTitleKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+async function fetchAniListAnime(series, force = false) {
+  const title = String(series?.name || "").trim();
+  if (!title) return null;
+  const key = `anilist:${normalizeTitleKey(title)}`;
+  if (!force && ANILIST_CACHE[key]) return ANILIST_CACHE[key];
+  const query = `query ($search:String!) {
+    Page(page:1, perPage:8) {
+      media(search:$search, type:ANIME, sort:[SEARCH_MATCH, POPULARITY_DESC]) {
+        id
+        idMal
+        format
+        title { romaji english native userPreferred }
+        startDate { year }
+        episodes
+        duration
+        description(asHtml:false)
+        coverImage { extraLarge large medium }
+        bannerImage
+        averageScore
+        popularity
+        genres
+        status
+        siteUrl
+      }
+    }
+  }`;
+  try {
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ query, variables: { search: title } }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => ({}));
+    const rows = Array.isArray(j?.data?.Page?.media) ? j.data.Page.media : [];
+    const wanted = normalizeTitleKey(title);
+    const norm = (v) => normalizeTitleKey(v);
+    const pick = rows.find(x => [x?.title?.english, x?.title?.romaji, x?.title?.userPreferred, x?.title?.native]
+      .some(v => norm(v) === wanted))
+      || rows.find(x => [x?.title?.english, x?.title?.romaji, x?.title?.userPreferred]
+        .some(v => { const a = norm(v); return a && (a.includes(wanted) || wanted.includes(a)); }));
+    if (!pick) return null;
+    const poster = pick.coverImage?.extraLarge || pick.coverImage?.large || pick.coverImage?.medium || "";
+    const result = {
+      ok: true, source: "anilist", provider: "anilist",
+      anilistId: pick.id || null, malId: pick.idMal || null,
+      mediaType: mediaTypeOf(series) === "movie" ? "movie" : "tv",
+      title: pick.title?.english || pick.title?.romaji || pick.title?.userPreferred || title,
+      originalTitle: pick.title?.native || "",
+      year: pick.startDate?.year || null,
+      posterUrl: poster,
+      backdropUrl: pick.bannerImage || poster,
+      posterPath: null, backdropPath: null,
+      overview: String(pick.description || "").replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim(),
+      rating: typeof pick.averageScore === "number" ? pick.averageScore / 10 : null,
+      voteCount: null,
+      popularity: typeof pick.popularity === "number" ? pick.popularity : null,
+      status: pick.status || "",
+      runtime: typeof pick.duration === "number" ? pick.duration : null,
+      runtimeText: typeof pick.duration === "number" ? fmtRuntime(pick.duration) : "",
+      episodeRunTime: typeof pick.duration === "number" ? [pick.duration] : [],
+      episodesTotal: pick.episodes || null,
+      genres: Array.isArray(pick.genres) ? pick.genres.map((name, i) => ({ id: i + 1, name })) : [],
+      seasons: [], siteUrl: pick.siteUrl || null,
+    };
+    ANILIST_CACHE[key] = result;
+    saveAniListCache();
+    return result;
+  } catch { return null; }
 }
 
 async function fetchJikanAnime(series, force = false) {
@@ -1086,7 +1162,8 @@ async function fetchTmdbArt(series, force = false) {
       // TMDB is unavailable, fall back to Jikan for anime artwork.
       let data = null;
       try {
-        const r = await fetch(`/api/tmdb?${params.toString()}`);
+        params.set("v", "20260814-4");
+        const r = await fetch(`/api/tmdb?${params.toString()}`, { cache: "no-store", headers: { accept: "application/json" } });
         data = await r.json().catch(() => ({}));
         if (!r.ok || !data?.ok) {
           if (r.status === 503) tmdbUnavailable = true;
@@ -1101,7 +1178,16 @@ async function fetchTmdbArt(series, force = false) {
         return data;
       }
 
-      // Only pay the extra anime lookup when TMDB did not return usable art.
+      // Anime fallback is direct from AniList. This avoids making artwork depend on a flaky Jikan/Vercel hop.
+      const ani = await fetchAniListAnime(series);
+      if (ani?.posterUrl || ani?.backdropUrl) {
+        const fallback = { ...ani, backdropUrl: ani.backdropUrl || ani.posterUrl || "" };
+        TMDB_CACHE[key] = fallback;
+        saveTmdbCache();
+        return fallback;
+      }
+
+      // Only try the Jikan proxy after AniList has no exact match.
       const anime = await fetchJikanAnime(series);
       const wanted = normalizeTitleKey(series.name);
       const animeTitle = normalizeTitleKey(anime?.title);
@@ -1115,6 +1201,11 @@ async function fetchTmdbArt(series, force = false) {
       TMDB_FAILED.set(key, Date.now());
       return null;
     } catch {
+      const ani = await fetchAniListAnime(series);
+      if (ani?.posterUrl || ani?.backdropUrl) {
+        const fallback = { ...ani, backdropUrl: ani.backdropUrl || ani.posterUrl || "" };
+        TMDB_CACHE[key] = fallback; saveTmdbCache(); return fallback;
+      }
       TMDB_FAILED.set(key, Date.now());
       const anime = await fetchJikanAnime(series);
       if (anime) {
@@ -2065,7 +2156,7 @@ async function join() {
     // a blocked auth endpoint/ad-blocker/network issue used to leave the gate
     // permanently stuck on “Signing in…”.
     if (!auth.currentUser) {
-      const authPromise = signInAnonymously(auth);
+      const authPromise = signInAnonymously(auth).catch((e) => { throw e; });
       await Promise.race([
         authPromise,
         new Promise((_, reject) => setTimeout(() => {
