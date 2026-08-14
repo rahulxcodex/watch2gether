@@ -213,10 +213,7 @@ async function watchLibraryEpisode(series, ep) {
   const parsed = parseSource(episodeUrl);
   if (!parsed) return say("This episode has an invalid or unsupported stream link.");
 
-  const existing = SAVED_ROOMS.find((r) => r.episodeId === ep.id);
-  const code = existing?.code || roll();
-
-  R.pendingSource = {
+  const source = {
     kind: parsed.kind,
     ref: episodeUrl,
     title: `${series.name} — ${ep.title || parsed.title || "Episode"}`,
@@ -229,6 +226,26 @@ async function watchLibraryEpisode(series, ep) {
     subtitleName: ep.subtitleFileName || "",
     size: 0,
   };
+
+  // Already connected to a room (the user just stepped into the library view
+  // via the "Library" button while watching something) — swap the video
+  // inside that same room instead of routing to a different room. Previously
+  // "Library" always did a full page reload, which dropped R.room, so this
+  // path never had a room to reuse and always rolled/joined a new one,
+  // splitting anyone else watching along away from you.
+  if (R.room) {
+    rememberRoom(R.room, { episodeId: ep.id });
+    setSource(source);
+    $("#landing").classList.remove("on");
+    $("#app").classList.add("on");
+    say(`Switched to ${series.name} — ${ep.title || "episode"}`);
+    return;
+  }
+
+  const existing = SAVED_ROOMS.find((r) => r.episodeId === ep.id);
+  const code = existing?.code || roll();
+
+  R.pendingSource = source;
 
   $("#code").value = code;
   showGate(code);
@@ -749,6 +766,16 @@ $("#landingAddBtn").onclick = () => {
 $("#librarySeriesSelect").onchange = syncSeriesFields;
 $("#landingJoinBtn").onclick = () => showGate();
 $("#homeBtn").onclick = () => {
+  // While connected to a room, just switch to the library view without a
+  // full reload — reload used to wipe R.room from memory, so picking another
+  // episode had no idea a room was already active and always jumped you into
+  // a brand new one instead of updating the one you were just in.
+  if (R.room) {
+    $("#app").classList.remove("on");
+    $("#landing").classList.add("on");
+    renderLanding();
+    return;
+  }
   location.hash = "";
   location.reload();
 };
