@@ -4132,7 +4132,17 @@ async function makeOffer(uid) {
 }
 
 async function onSignal(from, d) {
-  if (!VOICE.on || !d) return;
+  // This used to bail out here whenever the local mic was off — but a
+  // receive-only listener (mic off, other person's mic on) is a supported,
+  // intentional mode: syncPeers() still creates a peer connection for them.
+  // Gating signal *processing* on VOICE.on meant that connection was created
+  // but never actually completed the handshake — the other side's offer
+  // arrived, got discarded right here, and (since signal messages are
+  // deleted from the database the moment they're read, in wireRoom()) was
+  // gone for good. The connection then sat forever in "new", neither
+  // connected nor failed, with nothing on screen to explain why. Only bail
+  // on a genuinely empty payload now.
+  if (!d) return;
   const p = ensurePeer(from, false);
   try {
     if (d.sdp) {
