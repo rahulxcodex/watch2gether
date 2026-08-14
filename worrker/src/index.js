@@ -61,13 +61,16 @@ export default {
       case url.pathname.startsWith("/media/"):
         return media(decodeURIComponent(url.pathname.slice(7)), request, env);
 
+      case url.pathname === "/proxy":
+        return proxy(url, request, env);
+
       case url.pathname.startsWith("/upload/"):
         return upload(url, request, env);
 
       default:
         return new Response("Not found", {
           status: 404,
-          headers: { ...TEXT, ...cors(env) },
+          headers: { "content-type": "text/plain; charset=utf-8", ...cors(env) },
         });
     }
   },
@@ -115,12 +118,6 @@ async function library(env) {
       t.bytes += obj.size;
 
       if (VIDEO_EXT.test(file)) {
-        // Only top-level files are playable sources. An HLS package puts its
-        // master playlist here and everything else — variant playlists (which
-        // ffmpeg also calls index.m3u8) and segments — in subfolders. Listing
-        // those would turn one title into five.
-        if (file.includes("/")) continue;
-
         t.sources.push({
           key: obj.key,
           label: labelFor(file),
@@ -230,6 +227,103 @@ async function media(key, request, env) {
   return new Response(object.body, { status, headers });
 }
 
+/* ------------------------------------------------------------------ *
+ * Proxy — for HLS (or any) sources on a host that doesn't send CORS
+ * headers. The browser can't read a cross-origin response without them,
+ * so this fetches server-side (no CORS rules apply between servers) and
+ * re-adds them on the way back. Range is forwarded both ways so hls.js's
+ * segment requests still work.
+ *
+ * Open by design, same as /media: it only relays bytes, it doesn't hand
+ * out anything private. Restricted to http(s) and blocks obviously-local
+ * targets to stop it being used to probe the Worker's own network.
+ * ------------------------------------------------------------------ */
+function isPrivateHost(hostname) {
+  const h = hostname.toLowerCase();
+  return (
+    /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)/i.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+    /^::ffff:(127\.|10\.|192\.168\.|169\.254\.)/i.test(h)
+  );
+}
+
+const MAX_REDIRECTS = 5;
+
+/* redirect: "follow" only checks the URL we start with. A remote server can
+ * 30x us to a private/local address afterwards (cloud metadata endpoint,
+ * internal service, etc.) and the follower would go there anyway, since
+ * this Worker runs inside Cloudflare's network. Walk the chain by hand and
+ * re-check every hop against the same guard. */
+async function safeFetch(target, options) {
+  let current = target;
+  for (let i = 0; i <= MAX_REDIRECTS; i++) {
+    let t;
+    try { t = new URL(current); } catch { throw new Error("Bad URL"); }
+    if (isPrivateHost(t.hostname)) throw new Error("Refused: private/local target");
+    const res = await fetch(current, { ...options, redirect: "manual" });
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const loc = res.headers.get("location");
+      if (!loc) throw new Error("Redirect with no Location header.");
+      current = new URL(loc, current).href;
+      continue;
+    }
+    return res;
+  }
+  throw new Error("Too many redirects.");
+}
+
+async function proxy(url, request, env) {
+  const target = url.searchParams.get("url");
+  if (!target || !/^https?:\/\//i.test(target)) {
+    return json({ error: "Bad or missing ?url=" }, env, 400);
+  }
+
+  try { new URL(target); } catch { return json({ error: "Bad URL" }, env, 400); }
+
+  const upstream = new Headers();
+  const range = request.headers.get("range");
+  if (range) upstream.set("range", range);
+  upstream.set("user-agent", "Mozilla/5.0");
+  upstream.set("accept", "*/*");
+
+  let res;
+  try {
+    res = await safeFetch(target, { headers: upstream });
+  } catch (e) {
+    return json({ error: `Upstream fetch failed: ${e?.message || e}` }, env, 502);
+  }
+
+  const headers = new Headers(cors(env));
+  for (const h of ["content-type", "content-length", "content-range", "accept-ranges", "cache-control", "etag"]) {
+    const v = res.headers.get(h);
+    if (v) headers.set(h, v);
+  }
+
+  // HLS playlists reference segments with relative paths; rewrite those to
+  // go back through this same proxy, or the browser resolves them against
+  // the page's own origin instead of the stream's.
+  const ct = res.headers.get("content-type") || "";
+  if (/mpegurl|m3u8/i.test(ct) || target.toLowerCase().includes(".m3u8")) {
+    const text = await res.text();
+    const base = target;
+    const proxyBase = `${url.origin}/proxy?url=`;
+    const rewritten = text.split("\n").map((line) => {
+      const l = line.trim();
+      if (!l || l.startsWith("#")) {
+        // URI="..." attributes (e.g. on #EXT-X-KEY, #EXT-X-MAP)
+        return line.replace(/URI="([^"]+)"/i, (_m, u) =>
+          `URI="${proxyBase}${encodeURIComponent(new URL(u, base).href)}"`);
+      }
+      return proxyBase + encodeURIComponent(new URL(l, base).href);
+    }).join("\n");
+    headers.set("content-type", "application/vnd.apple.mpegurl");
+    headers.delete("content-length");
+    return new Response(rewritten, { status: res.status, headers });
+  }
+
+  return new Response(res.body, { status: res.status, headers });
+}
+
 function guessType(key) {
   const ext = key.split(".").pop().toLowerCase();
   return {
@@ -324,13 +418,12 @@ async function upload(url, request, env) {
   }
 }
 
-/* Writes stay under library/<slug>/... and can't traverse out. Depth is capped
-   rather than fixed at three, because an HLS package is a tree: a master
-   playlist beside one folder of segments per rendition. */
-const validKey = (k) => {
-  if (typeof k !== "string" || !k.startsWith("library/") || k.includes("..")) return false;
-  const parts = k.split("/");
-  return parts.length >= 3 && parts.length <= 6 &&
-         parts.every((p) => p.length > 0 && p !== ".") &&
-         k.length < 512;
-};
+/* Writes are confined to library/<slug>/<file> — exactly three segments, no
+   traversal. Nothing else in the bucket is reachable from a browser. */
+const validKey = (k) =>
+  typeof k === "string" &&
+  k.startsWith("library/") &&
+  !k.includes("..") &&
+  k.split("/").length === 3 &&
+  k.split("/").every((p) => p.length > 0) &&
+  k.length < 512;
