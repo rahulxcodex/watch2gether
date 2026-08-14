@@ -187,10 +187,6 @@ ${playlistHint}`;
     const result = await fetchWithRetry(groqBase, groqHeaders, {
       model: "groq/compound",
       messages: [{ role: "user", content: prompt }],
-      // Caps the response so input + output can't together exceed the
-      // free-tier per-request/per-minute token ceiling (413 request_too_large
-      // is a hard cap, not a transient rate limit, so retrying won't help).
-      max_completion_tokens: 1200,
     });
     if (!result.ok) {
       return res.status(502).json({
