@@ -10,13 +10,16 @@
  *   with a responseSchema so the reply is constrained JSON instead of
  *   free text.
  *
- * gemini-2.5-flash was dropped in favor of gemini-3.1-flash-lite: Google
- * has been retiring 2.5-series models ahead of their published shutdown
- * dates, and 3.1-flash-lite currently has the most generous free-tier
- * limits (~30 requests/minute, ~1,500/day) of the actively supported
- * models. If Google retires this one too, swap the MODEL constant below
- * for whatever https://ai.google.dev/gemini-api/docs/models currently
- * lists as free-tier and non-deprecated.
+ * gemini-2.5-flash was dropped in favor of the `gemini-flash-latest` alias:
+ * Google has been retiring dated Flash model IDs (gemini-2.5-flash,
+ * gemini-3.1-flash-lite, etc.) faster than expected, sometimes returning
+ * 404s for a model ID before its documented shutdown date, or before it's
+ * fully rolled out to every account/region. `gemini-flash-latest` is an
+ * alias Google keeps pointed at whatever the current stable Flash model
+ * is, so this stops needing a code change every time Google reshuffles
+ * model names. If it ever needs to be pinned to a specific dated model
+ * instead, check https://ai.google.dev/gemini-api/docs/models for the
+ * current free-tier, non-deprecated list.
  *
  * Gemini's free tier (Google AI Studio, no credit card) covers both steps
  * with generous request/day and RPM limits, and Google Search grounding has
@@ -27,7 +30,7 @@
  */
 export const config = { runtime: "nodejs" };
 
-const MODEL = "gemini-3.1-flash-lite";
+const MODEL = "gemini-flash-latest";
 const MAX_URL_LENGTH = 4096;
 
 function badUrl(value) {
