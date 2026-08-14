@@ -116,7 +116,7 @@ const LIBRARY_KEY = "wtLibraryV1";
 function mediaTypeOf(series, item = null) {
   if (item?.mediaType === "movie" || series?.mediaType === "movie") return "movie";
   if (item?.mediaType === "series" || series?.mediaType === "series") return "series";
-  if (item && (item.episodeCode === "Movie" || (item.seasonNumber == null && item.episodeNumber == null))) return "movie";
+  if (item?.episodeCode === "Movie") return "movie";
   return "series";
 }
 
@@ -145,8 +145,7 @@ function normalizeLibraryMediaTypes() {
     }
     for (const item of series.episodes) {
       const nextItemType = item.mediaType === "movie" || nextSeriesType === "movie" ||
-        item.episodeCode === "Movie" ||
-        (item.seasonNumber == null && item.episodeNumber == null) ? "movie" : "episode";
+        item.episodeCode === "Movie" ? "movie" : "episode";
       if (item.mediaType !== nextItemType) {
         item.mediaType = nextItemType;
         changed = true;
@@ -226,6 +225,7 @@ function findSeries(name) {
 }
 
 function showLanding() {
+  document.body.classList.add("landing-page");
   $("#landing").classList.add("on");
   $("#gate").style.display = "none";
   $("#app").classList.remove("on");
@@ -233,6 +233,7 @@ function showLanding() {
 }
 
 function showGate(code = "") {
+  document.body.classList.remove("landing-page");
   $("#landing").classList.remove("on");
   $("#gate").style.display = "grid";
   $("#app").classList.remove("on");
@@ -900,6 +901,12 @@ let TMDB_SEASON_CACHE = readStore(TMDB_SEASON_CACHE_KEY, {});
 let activeLibraryTitle = null;
 let tmdbHydrationInFlight = false;
 let tmdbUnavailable = false;
+// Prevent repeated failed requests from creating render/fetch loops.
+const TMDB_FAILED = new Map();
+const TMDB_RETRY_MS = 10 * 60 * 1000;
+const TMDB_INFLIGHT = new Map();
+const TMDB_SEASON_FAILED = new Map();
+const TMDB_SEASON_INFLIGHT = new Map();
 
 function saveTmdbCache() {
   try { localStorage.setItem(TMDB_CACHE_KEY, JSON.stringify(TMDB_CACHE)); } catch {}
@@ -914,27 +921,39 @@ function tmdbArt(series) {
 }
 
 async function fetchTmdbArt(series, force = false) {
-  if (tmdbUnavailable && !force) return null;
   const key = String(series.imdbId || series.name || series.id || "").toLowerCase();
   if (!key) return null;
   if (!force && TMDB_CACHE[key]) return TMDB_CACHE[key];
-  try {
-    const type = mediaTypeOf(series) === "movie" ? "movie" : "tv";
-    const params = new URLSearchParams({ type });
-    if (series.imdbId) params.set("imdbId", series.imdbId);
-    params.set("title", series.name || "");
-    const r = await fetch(`/api/tmdb?${params.toString()}`);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data?.ok) {
-      if (r.status === 503) tmdbUnavailable = true;
+  const failedAt = TMDB_FAILED.get(key) || 0;
+  if (!force && failedAt && Date.now() - failedAt < TMDB_RETRY_MS) return null;
+  if (!force && TMDB_INFLIGHT.has(key)) return TMDB_INFLIGHT.get(key);
+
+  const request = (async () => {
+    try {
+      const type = mediaTypeOf(series) === "movie" ? "movie" : "tv";
+      const params = new URLSearchParams({ type });
+      if (series.imdbId) params.set("imdbId", series.imdbId);
+      params.set("title", series.name || "");
+      const r = await fetch(`/api/tmdb?${params.toString()}`);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data?.ok) {
+        if (r.status === 503) tmdbUnavailable = true;
+        TMDB_FAILED.set(key, Date.now());
+        return null;
+      }
+      TMDB_FAILED.delete(key);
+      TMDB_CACHE[key] = data;
+      saveTmdbCache();
+      return data;
+    } catch {
+      TMDB_FAILED.set(key, Date.now());
       return null;
+    } finally {
+      TMDB_INFLIGHT.delete(key);
     }
-    TMDB_CACHE[key] = data;
-    saveTmdbCache();
-    return data;
-  } catch {
-    return null;
-  }
+  })();
+  TMDB_INFLIGHT.set(key, request);
+  return request;
 }
 
 async function fetchTmdbSeason(series, seasonNumber, force = false) {
@@ -943,18 +962,28 @@ async function fetchTmdbSeason(series, seasonNumber, force = false) {
   if (!tmdbId || mediaTypeOf(series) === "movie") return null;
   const key = `${tmdbId}:s${seasonNumber}`;
   if (!force && TMDB_SEASON_CACHE[key]) return TMDB_SEASON_CACHE[key];
-  try {
-    const params = new URLSearchParams({ action: "season", type: "tv", tmdbId: String(tmdbId), season: String(seasonNumber) });
-    const r = await fetch(`/api/tmdb?${params.toString()}`);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data?.ok) throw new Error(data?.error || `TMDB season HTTP ${r.status}`);
-    TMDB_SEASON_CACHE[key] = data;
-    saveTmdbSeasonCache();
-    return data;
-  } catch (e) {
-    console.warn("TMDB season lookup failed", e);
-    return null;
-  }
+  const failedAt = TMDB_SEASON_FAILED.get(key) || 0;
+  if (!force && failedAt && Date.now() - failedAt < TMDB_RETRY_MS) return null;
+  if (!force && TMDB_SEASON_INFLIGHT.has(key)) return TMDB_SEASON_INFLIGHT.get(key);
+  const request = (async () => {
+    try {
+      const params = new URLSearchParams({ action: "season", type: "tv", tmdbId: String(tmdbId), season: String(seasonNumber) });
+      const r = await fetch(`/api/tmdb?${params.toString()}`);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data?.ok) throw new Error(data?.error || `TMDB season HTTP ${r.status}`);
+      TMDB_SEASON_FAILED.delete(key);
+      TMDB_SEASON_CACHE[key] = data;
+      saveTmdbSeasonCache();
+      return data;
+    } catch {
+      TMDB_SEASON_FAILED.set(key, Date.now());
+      return null;
+    } finally {
+      TMDB_SEASON_INFLIGHT.delete(key);
+    }
+  })();
+  TMDB_SEASON_INFLIGHT.set(key, request);
+  return request;
 }
 
 function fmtRuntime(minutes) {
@@ -1015,6 +1044,11 @@ async function openInlineSeries(series) {
   if (!panel) return openLibraryDetail(series);
   if (panel.dataset.seriesId === String(series.id) && !panel.hidden) { panel.hidden = true; panel.innerHTML=""; panel.dataset.seriesId=""; return; }
   panel.dataset.seriesId = String(series.id); panel.hidden = false;
+  // The panel only lives inside the "Series" section. If the card that was
+  // clicked lives in a different row (e.g. "My Library"), the expand panel
+  // would render off-screen and the click would look like it did nothing.
+  // Always bring it into view once it's populated.
+  requestAnimationFrame(() => panel.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   const art = tmdbArt(series);
   const genres = (art?.genres || []).map(g=>g.name).filter(Boolean).join(" · ");
   const cast = (art?.credits?.cast || []).slice(0,5).map(c=>c.name).filter(Boolean).join(", ");
@@ -1054,21 +1088,26 @@ async function openInlineSeries(series) {
 }
 
 async function hydrateLibraryArt() {
-  if (tmdbHydrationInFlight || tmdbUnavailable || !MY_LIBRARY.length) return;
+  if (tmdbHydrationInFlight || !MY_LIBRARY.length) return;
   const pending = MY_LIBRARY.slice(0, 30).filter((series) => {
     const key = String(series.imdbId || series.name || series.id || "").toLowerCase();
-    return !TMDB_CACHE[key];
+    if (!key || TMDB_CACHE[key]) return false;
+    const failedAt = TMDB_FAILED.get(key) || 0;
+    return !failedAt || Date.now() - failedAt >= TMDB_RETRY_MS;
   });
   if (!pending.length) return;
   tmdbHydrationInFlight = true;
+  let changed = false;
   try {
-    // Resolve sequentially to avoid a burst of TMDB requests when a large
-    // library is first opened. Cached titles require no network request.
-    for (const series of pending) await fetchTmdbArt(series);
+    for (const series of pending) {
+      const before = tmdbArt(series);
+      const after = await fetchTmdbArt(series);
+      if (!before && after) changed = true;
+    }
   } finally {
     tmdbHydrationInFlight = false;
-    renderLanding();
   }
+  if (changed) renderLanding();
 }
 
 function posterUrl(art, size = "w342") {
@@ -1150,6 +1189,7 @@ function renderNetflixCard(series) {
   card.className = "netflix-card";
   card.tabIndex = 0;
   card.setAttribute("role", "button");
+  card.dataset.libraryId = String(series.id || "");
   card.setAttribute("aria-label", `Open ${series.name || type}`);
 
   const poster = posterUrl(art);
@@ -1194,6 +1234,38 @@ function makePosterFallback(name) {
   return el;
 }
 
+function setupNetflixRows() {
+  document.querySelectorAll(".netflix-row").forEach((row) => {
+    if (row.dataset.scrollReady === "1") return;
+    row.dataset.scrollReady = "1";
+    row.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || row.scrollWidth <= row.clientWidth) return;
+      e.preventDefault();
+      row.scrollLeft += e.deltaY;
+    }, { passive: false });
+    let down = false, startX = 0, startScroll = 0, moved = false;
+    row.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      down = true; moved = false; startX = e.clientX; startScroll = row.scrollLeft;
+      row.classList.add("is-dragging");
+      row.setPointerCapture?.(e.pointerId);
+    });
+    row.addEventListener("pointermove", (e) => {
+      if (!down) return;
+      const dx = e.clientX - startX;
+      if (Math.abs(dx) > 5) moved = true;
+      row.scrollLeft = startScroll - dx;
+    });
+    const end = () => { down = false; row.classList.remove("is-dragging"); };
+    row.addEventListener("pointerup", end);
+    row.addEventListener("pointercancel", end);
+    row.addEventListener("click", (e) => {
+      if (!moved) return;
+      e.preventDefault(); e.stopPropagation(); moved = false;
+    }, true);
+  });
+}
+
 function renderLanding() {
   const allRow = $("#allRow");
   const moviesRow = $("#moviesRow");
@@ -1217,6 +1289,7 @@ function renderLanding() {
   for (const item of ordered) allRow.appendChild(renderNetflixCard(item));
   for (const item of movies) moviesRow.appendChild(renderNetflixCard(item));
   for (const item of series) seriesRow.appendChild(renderNetflixCard(item));
+  setupNetflixRows();
 
   const heroTitle = $("#libraryHeroTitle");
   const heroSummary = $("#libraryHeroSummary");
@@ -1522,10 +1595,20 @@ $("#landingAddBtn").onclick = () => {
   else $("#libraryFormOverlay").hidden = true;
 };
 $("#libraryFormClose")?.addEventListener("click", () => { $("#libraryFormOverlay").hidden = true; });
-$("#navHome")?.addEventListener("click", () => window.scrollTo({top:0, behavior:"smooth"}));
-$("#navMovies")?.addEventListener("click", () => $("#moviesSection").scrollIntoView({behavior:"smooth", block:"start"}));
-$("#navSeries")?.addEventListener("click", () => $("#seriesSection").scrollIntoView({behavior:"smooth", block:"start"}));
-$("#navRooms")?.addEventListener("click", () => $("#roomsSection").scrollIntoView({behavior:"smooth", block:"start"}));
+function scrollLandingTo(selector) {
+  const landing = $("#landing");
+  const target = $(selector);
+  if (!landing || !target || target.hidden) return;
+  const top = Math.max(0, target.offsetTop - 72);
+  landing.scrollTo({ top, behavior: "smooth" });
+}
+$("#navHome")?.addEventListener("click", () => {
+  if (!$("#landing")?.classList.contains("on")) showLanding();
+  else $("#landing").scrollTo({ top: 0, behavior: "smooth" });
+});
+$("#navMovies")?.addEventListener("click", () => scrollLandingTo("#moviesSection"));
+$("#navSeries")?.addEventListener("click", () => scrollLandingTo("#seriesSection"));
+$("#navRooms")?.addEventListener("click", () => scrollLandingTo("#roomsSection"));
 $("#librarySeriesSelect").onchange = syncSeriesFields;
 
 /* Movies don't have seasons/episodes, so checking "This is a movie" hides
@@ -1569,6 +1652,7 @@ $("#homeBtn").onclick = () => {
   // episode had no idea a room was already active and always jumped you into
   // a brand new one instead of updating the one you were just in.
   if (R.room) {
+    document.body.classList.add("landing-page");
     $("#app").classList.remove("on");
     $("#landing").classList.add("on");
     renderLanding();
@@ -1676,6 +1760,7 @@ async function join() {
   R.uid = auth.currentUser.uid;
   location.hash = code;
 
+  document.body.classList.remove("landing-page");
   $("#gate").style.display = "none";
   $("#landing").classList.remove("on");
   $("#app").classList.add("on");
@@ -3272,11 +3357,17 @@ function paintMic() {
 }
 
 function syncPeers() {
+  // If our mic is on, connect to every other member so we can both send and
+  // receive audio. A user with their mic off must still be able to hear us.
+  // If our mic is off, we still create receive-only peers for members who are
+  // broadcasting voice.
   const want = new Set(
-    VOICE.on ? R.members.filter((m) => m.uid !== R.uid).map((m) => m.uid) : []
+    R.members
+      .filter((m) => m.uid !== R.uid && (VOICE.on || m.voice))
+      .map((m) => m.uid)
   );
   for (const uid of [...VOICE.peers.keys()]) if (!want.has(uid)) dropPeer(uid);
-  for (const uid of want) ensurePeer(uid, true);
+  for (const uid of want) ensurePeer(uid, VOICE.on && R.uid < uid);
 }
 
 function ensurePeer(uid, mayOffer) {
