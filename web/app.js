@@ -188,12 +188,11 @@ function openRoom(code) {
 
 async function watchLibraryEpisode(series, ep) {
   let episodeUrl = String(ep.url || "").trim();
-  if (!episodeUrl) {
-    return say(`${ep.episodeCode || ep.title} has subtitles saved, but no video link yet. Add the episode link first.`);
-  }
 
   // Older library entries created before URL persistence may not have ep.url.
   // Offer a one-time repair instead of sending undefined to Firebase.
+  // (Previously an early `if (!episodeUrl) return say(...)` above this block
+  // made this repair flow unreachable dead code — removed so it actually runs.)
   if (!episodeUrl) {
     const repaired = await ask({
       title: "Episode link missing",
@@ -233,6 +232,25 @@ async function watchLibraryEpisode(series, ep) {
   $("#code").value = code;
   showGate(code);
   if ($("#who").value) join();
+}
+
+/* Lets the user replace the stream link on a library episode that already
+ * has one — e.g. a dead/expired .m3u8 link — without deleting and re-adding
+ * the whole episode. Reuses the same "paste link" prompt as the repair flow
+ * in watchLibraryEpisode(). */
+async function changeLibraryEpisodeVideo(series, ep) {
+  const updated = await ask({
+    title: "Change video link",
+    body: `Paste a new .m3u8/direct-video link for "${ep.title || "this episode"}". This replaces the current link.`,
+    value: String(ep.url || ""),
+    ok: "Save",
+  });
+  if (updated == null) return;
+  if (!/^https?:\/\//i.test(updated)) return say("Please enter a valid http(s) episode link.");
+  if (!parseSource(updated)) return say("That doesn't look like a playable video or HLS URL.");
+  ep.url = updated;
+  writeLibrary();
+  say(`${series.name} — ${ep.title || "episode"} · video link updated`);
 }
 
 async function addLibraryEpisode(form) {
@@ -572,12 +590,14 @@ function renderLanding() {
           </div>
           <div class="episode-actions">
             <button class="btn primary episode-watch" type="button">${watchLabel}</button>
+            <button class="episode-change-video" type="button" title="Change video link">Edit link</button>
             <button class="episode-delete" type="button" title="Remove episode">×</button>
           </div>`;
         row.querySelector(".episode-watch").onclick = () => {
           if (ep.url) watchLibraryEpisode(series, ep);
           else openLibraryForm(series.name);
         };
+        row.querySelector(".episode-change-video").onclick = () => changeLibraryEpisodeVideo(series, ep);
         row.querySelector(".episode-delete").onclick = () => deleteLibraryEpisode(series.id, ep.id);
         list.appendChild(row);
       }
