@@ -482,6 +482,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 .detail-head{margin-bottom:16px;}
 .detail-head h3{font-size:18px;}
 .detail-add-btn{min-height:38px;border-radius:8px;}
+.detail-head-actions{display:flex;gap:8px;align-items:center;}
 .detail-info-grid{margin:0 0 18px;}
 .detail-season-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 18px;padding:0;}
 .detail-season-tab{min-width:110px;padding:10px 13px;border-radius:9px;}
@@ -657,7 +658,7 @@ html,body{max-width:100%;overflow-x:hidden;}
   <div class="library-detail-card">
     <button class="library-detail-close" id="libraryDetailClose" type="button">×</button>
     <div class="library-detail-hero" id="libraryDetailHero"><div class="library-detail-copy"><h2 id="libraryDetailTitle"></h2><p id="libraryDetailSummary"></p></div></div>
-    <div class="library-detail-body"><div class="detail-head"><h3 id="libraryDetailHeading">Episodes</h3><button class="btn primary detail-add-btn" id="libraryDetailAdd" type="button">+ Add</button></div><div class="detail-episodes" id="libraryDetailEpisodes"></div></div>
+    <div class="library-detail-body"><div class="detail-head"><h3 id="libraryDetailHeading">Episodes</h3><div class="detail-head-actions"><button class="btn detail-add-btn" id="libraryDetailShare" type="button" hidden>Share to room</button><button class="btn primary detail-add-btn" id="libraryDetailAdd" type="button">+ Add</button></div></div><div class="detail-episodes" id="libraryDetailEpisodes"></div></div>
   </div>
 </div>
 
@@ -900,6 +901,8 @@ html,body{max-width:100%;overflow-x:hidden;}
 
       <div id="uploads"></div>
       <div class="lib-list" id="lists">
+        <div class="sect" id="sharedLibSect" hidden><span class="eyebrow">Shared from library</span></div>
+        <div id="sharedLibList"></div>
         <div class="sect" id="shelfSect" hidden><span class="eyebrow">Saved media</span></div>
         <div id="shelfList"></div>
         <div class="sect" id="libSect" hidden><span class="eyebrow">Uploaded files</span></div>
@@ -907,7 +910,8 @@ html,body{max-width:100%;overflow-x:hidden;}
         <div class="hollow" id="listEmpty">
           Nothing saved yet.<br><br>
           Paste a link and press <b>Save to shelf</b> and it stays here for both
-          of you, whatever it's hosted on.
+          of you, whatever it's hosted on. Titles shared from someone's
+          library will show up here too.
         </div>
       </div>
       <div class="drop" id="drop"><span>Drop a video, or an .srt to use as subtitles</span></div>
