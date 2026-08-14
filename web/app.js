@@ -1210,12 +1210,49 @@ async function join() {
   err.textContent = "Signing in…";
 
   try {
-    await signInAnonymously(auth);
+    // Resume-room clicks can land here while Firebase Auth is still restoring
+    // the previous anonymous session. Reuse it when available instead of
+    // starting another sign-in request. Also put a hard timeout around Auth:
+    // a blocked auth endpoint/ad-blocker/network issue used to leave the gate
+    // permanently stuck on “Signing in…”.
+    if (!auth.currentUser) {
+      const authPromise = signInAnonymously(auth);
+      await Promise.race([
+        authPromise,
+        new Promise((_, reject) => setTimeout(() => {
+          const e = new Error("Firebase Authentication did not respond in time.");
+          e.code = "auth-timeout";
+          reject(e);
+        }, 12000)),
+      ]);
+    }
+
+    // signInAnonymously resolves with a credential, but auth.currentUser is
+    // the source of truth used by the room/member paths below. Give Firebase
+    // one short tick to publish it if this is a freshly-created session.
+    if (!auth.currentUser) {
+      await new Promise((resolve, reject) => {
+        let done = false;
+        const stop = onAuthStateChanged(auth, (user) => {
+          if (done) return;
+          if (user) { done = true; stop(); resolve(user); }
+        }, (e) => {
+          if (!done) { done = true; stop(); reject(e); }
+        });
+        setTimeout(() => {
+          if (!done) { done = true; stop(); reject(new Error("Firebase Authentication did not create a user.")); }
+        }, 3000);
+      });
+    }
   } catch (e) {
     $("#enter").disabled = false;
-    const hint = /admin-restricted|operation-not-allowed/.test(String(e.code || e))
+    const code = String(e.code || "");
+    const raw = String(e.message || e);
+    const hint = /admin-restricted|operation-not-allowed/.test(code)
       ? "Anonymous sign-in is switched off. Firebase console → Authentication → Sign-in method → enable Anonymous."
-      : String(e.message || e);
+      : code === "auth-timeout"
+        ? "Firebase Authentication is not responding. Check your internet connection, browser extensions/ad-blockers, and that this domain is added under Firebase Authentication → Settings → Authorized domains."
+        : raw;
     return void (err.textContent = hint);
   }
 
