@@ -9,7 +9,7 @@
  * of JSON that both browsers subscribe to.
  * ======================================================================== */
 
-const APP_BUILD = "20260814-4";
+const APP_BUILD = "20260814-5";
 
 import { firebaseConfig, CFG } from "./config.js";
 
@@ -38,6 +38,34 @@ const {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
+
+// Keep one anonymous-auth request alive and reuse it. Resume buttons used to
+// start a second sign-in while Firebase was still restoring the first session,
+// leaving the gate stuck on “Signing in…”. signInAnonymously() also returns the
+// authenticated user directly, so do not wait for currentUser to update.
+let anonymousAuthInFlight = null;
+async function ensureAnonymousAuth(timeoutMs = 12000) {
+  if (auth.currentUser) return auth.currentUser;
+  if (anonymousAuthInFlight) return anonymousAuthInFlight;
+  anonymousAuthInFlight = (async () => {
+    const credential = await Promise.race([
+      signInAnonymously(auth),
+      new Promise((_, reject) => setTimeout(() => {
+        const e = new Error("Firebase Authentication did not respond in time.");
+        e.code = "auth-timeout";
+        reject(e);
+      }, timeoutMs)),
+    ]);
+    const user = credential?.user || auth.currentUser;
+    if (!user) {
+      const e = new Error("Firebase Authentication did not create a user.");
+      e.code = "auth-no-user";
+      throw e;
+    }
+    return user;
+  })().finally(() => { anonymousAuthInFlight = null; });
+  return anonymousAuthInFlight;
+}
 
 if (CFG.analytics) {
   import(cdn("analytics"))
@@ -1543,8 +1571,8 @@ async function openLibraryDetail(series) {
 
 function renderDetailEpisode(series, ep, tmdbEp, movie=false) {
   const row=document.createElement("div"); row.className="detail-episode";
-  const artUrl=episodeStillUrl(tmdbEp, "w300");
-  const art=document.createElement("div"); art.className="detail-episode-art"; setBackgroundWithFallback(art, artUrl);
+  const artUrl=movie ? posterUrl(tmdbArt(series), "w500") : episodeStillUrl(tmdbEp, "w300");
+  const art=document.createElement("div"); art.className="detail-episode-art"; setBackgroundWithFallback(art, artUrl, movie ? (series.name || "Movie") : "");
   const copy=document.createElement("div"); copy.className="detail-episode-copy";
   const n=movie?"Movie":`S${String(tmdbEp?.seasonNumber ?? ep?.seasonNumber ?? 1).padStart(2,"0")}E${String(tmdbEp?.episodeNumber ?? ep?.episodeNumber ?? 1).padStart(2,"0")}`;
   const title=tmdbEp?.name || ep?.title || n;
@@ -1572,24 +1600,39 @@ function renderNetflixCard(series) {
   card.setAttribute("aria-label", `Open ${series.name || type}`);
 
   const poster = posterUrl(art);
-  if (poster) {
-    const skeleton = document.createElement("div");
-    skeleton.className = "netflix-card-skeleton";
+  const skeleton = document.createElement("div");
+  skeleton.className = "netflix-card-skeleton";
+  card.appendChild(skeleton);
+
+  const installPoster = (url) => {
+    skeleton.remove();
+    const old = card.querySelector("img,.poster-fallback");
+    if (old) old.remove();
+    if (!url) {
+      card.insertBefore(makePosterFallback(series.name || type), card.firstChild);
+      return;
+    }
     const img = document.createElement("img");
-    img.src = poster;
+    img.src = url;
     img.alt = series.name || type;
     img.loading = "lazy";
-    img.addEventListener("load", () => {
-      img.classList.add("loaded");
-      skeleton.remove();
-    }, { once: true });
+    img.addEventListener("load", () => img.classList.add("loaded"), { once: true });
     img.addEventListener("error", () => {
-      skeleton.remove();
       img.replaceWith(makePosterFallback(series.name || type));
     }, { once: true });
-    card.append(skeleton, img);
+    card.insertBefore(img, card.firstChild);
+  };
+
+  if (poster) {
+    installPoster(poster);
   } else {
-    card.appendChild(makePosterFallback(series.name || type));
+    // Do not leave a library card permanently blank while the background
+    // hydration pass is fetching metadata. Each card repairs itself.
+    installPoster("");
+    fetchTmdbArt(series).then((fresh) => {
+      const url = posterUrl(fresh);
+      if (url && card.isConnected) installPoster(url);
+    }).catch(() => {});
   }
 
   const shade = document.createElement("div");
@@ -2150,40 +2193,8 @@ async function join() {
   err.textContent = "Signing in…";
 
   try {
-    // Resume-room clicks can land here while Firebase Auth is still restoring
-    // the previous anonymous session. Reuse it when available instead of
-    // starting another sign-in request. Also put a hard timeout around Auth:
-    // a blocked auth endpoint/ad-blocker/network issue used to leave the gate
-    // permanently stuck on “Signing in…”.
-    if (!auth.currentUser) {
-      const authPromise = signInAnonymously(auth).catch((e) => { throw e; });
-      await Promise.race([
-        authPromise,
-        new Promise((_, reject) => setTimeout(() => {
-          const e = new Error("Firebase Authentication did not respond in time.");
-          e.code = "auth-timeout";
-          reject(e);
-        }, 12000)),
-      ]);
-    }
-
-    // signInAnonymously resolves with a credential, but auth.currentUser is
-    // the source of truth used by the room/member paths below. Give Firebase
-    // one short tick to publish it if this is a freshly-created session.
-    if (!auth.currentUser) {
-      await new Promise((resolve, reject) => {
-        let done = false;
-        const stop = onAuthStateChanged(auth, (user) => {
-          if (done) return;
-          if (user) { done = true; stop(); resolve(user); }
-        }, (e) => {
-          if (!done) { done = true; stop(); reject(e); }
-        });
-        setTimeout(() => {
-          if (!done) { done = true; stop(); reject(new Error("Firebase Authentication did not create a user.")); }
-        }, 3000);
-      });
-    }
+    const user = await ensureAnonymousAuth(12000);
+    R.uid = user.uid;
   } catch (e) {
     $("#enter").disabled = false;
     const code = String(e.code || "");
@@ -2191,7 +2202,7 @@ async function join() {
     const hint = /admin-restricted|operation-not-allowed/.test(code)
       ? "Anonymous sign-in is switched off. Firebase console → Authentication → Sign-in method → enable Anonymous."
       : code === "auth-timeout"
-        ? "Firebase Authentication is not responding. Check your internet connection, browser extensions/ad-blockers, and that this domain is added under Firebase Authentication → Settings → Authorized domains."
+        ? "Firebase Authentication is not responding. Check Authorized domains and any ad-blocker/network filtering."
         : raw;
     return void (err.textContent = hint);
   }
@@ -2199,7 +2210,8 @@ async function join() {
   localStorage.wtName = name;
   R.name = name;
   R.room = code;
-  R.uid = auth.currentUser.uid;
+  R.uid = R.uid || auth.currentUser?.uid;
+  if (!R.uid) { $("#enter").disabled = false; return void (err.textContent = "Firebase Authentication did not return a user."); }
   location.hash = code;
 
   document.body.classList.remove("landing-page");
