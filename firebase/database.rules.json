@@ -1,0 +1,212 @@
+{
+  "//": [
+    "Your Firebase web config is public by design and grants nothing on its own.",
+    "These rules are the actual lock. Deploy them before you share the app:",
+    "    firebase deploy --only database",
+    "or paste them into Firebase console -> Realtime Database -> Rules -> Publish.",
+    "",
+    "The model: anyone can sign in anonymously, so knowing a room code is what",
+    "gets you into a room. Codes are generated with real randomness for exactly",
+    "that reason. Nobody can list rooms, and nobody can read another person's",
+    "WebRTC signalling.",
+    "state deliberately tolerates unknown scalar fields. A single unlisted key would otherwise refuse the entire write and leave the room silently dead.",
+    "state has no hasChildren() requirement on purpose. Combined with partial update() writes it created rooms that could never be repaired: the repair write failed the very check it was trying to satisfy. Per-field validation below still constrains every value."
+  ],
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".validate": "$room.length >= 6 && $room.length <= 40",
+        "state": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          "playing": {
+            ".validate": "newData.isBoolean()"
+          },
+          "pos": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "rate": {
+            ".validate": "newData.isNumber() && newData.val() >= 0.25 && newData.val() <= 3"
+          },
+          "at": {
+            ".validate": "newData.isNumber()"
+          },
+          "kind": {
+            ".validate": "newData.val() == 'none' || newData.val() == 'yt' || newData.val() == 'url' || newData.val() == 'hls' || newData.val() == 'local' || newData.val() == 'r2'"
+          },
+          "ref": {
+            ".validate": "newData.isString() && newData.val().length <= 600"
+          },
+          "title": {
+            ".validate": "newData.isString() && newData.val().length <= 200"
+          },
+          "label": {
+            ".validate": "newData.isString() && newData.val().length <= 24"
+          },
+          "hostId": {
+            ".validate": "newData.isString() && newData.val().length <= 64"
+          },
+          "locked": {
+            ".validate": "newData.isBoolean()"
+          },
+          "pauseOnBuffer": {
+            ".validate": "newData.isBoolean()"
+          },
+          "size": {
+            ".validate": "newData.isNumber()"
+          },
+          "subtitleText": {
+            ".validate": "newData.isString() && newData.val().length <= 1500000"
+          },
+          "subtitleName": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "subs": {
+            "$i": {
+              "key": {
+                ".validate": "newData.isString() && newData.val().length <= 600"
+              },
+              "label": {
+                ".validate": "newData.isString() && newData.val().length <= 40"
+              },
+              "$x": {
+                ".validate": false
+              }
+            }
+          },
+          "$other": {
+            ".validate": "newData.isNumber() || newData.isBoolean() || (newData.isString() && newData.val().length <= 600)"
+          }
+        },
+        "members": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length <= 24"
+            },
+            "pos": {
+              ".validate": "newData.isNumber()"
+            },
+            "dur": {
+              ".validate": "newData.isNumber()"
+            },
+            "stalled": {
+              ".validate": "newData.isBoolean()"
+            },
+            "voice": {
+              ".validate": "newData.isBoolean()"
+            },
+            "noFile": {
+              ".validate": "newData.isBoolean()"
+            },
+            "at": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "chat": {
+          ".read": "auth != null",
+          "$msg": {
+            ".write": "auth != null && !data.exists()",
+            ".validate": "newData.child('uid').val() === auth.uid && newData.child('text').isString() && newData.child('text').val().length <= 400",
+            "uid": {
+              ".validate": "newData.val() === auth.uid"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length <= 24"
+            },
+            "text": {
+              ".validate": "newData.isString() && newData.val().length <= 400"
+            },
+            "at": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "sig": {
+          "$to": {
+            ".read": "auth != null && auth.uid === $to",
+            ".write": "auth != null && (newData.exists() || auth.uid === $to)",
+            "$id": {
+              ".validate": "newData.child('from').val() === auth.uid && newData.hasChild('data')"
+            }
+          }
+        },
+        "seen": {
+          ".read": "auth != null",
+          "$title": {
+            ".write": "auth != null",
+            "pos": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            },
+            "dur": {
+              ".validate": "newData.isNumber()"
+            },
+            "done": {
+              ".validate": "newData.isBoolean()"
+            },
+            "title": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "at": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "shelf": {
+          ".read": "auth != null",
+          "$id": {
+            ".write": "auth != null",
+            ".validate": "!newData.exists() || newData.hasChildren(['kind','ref','title'])",
+            "kind": {
+              ".validate": "newData.val() == 'yt' || newData.val() == 'url' || newData.val() == 'hls' || newData.val() == 'r2'"
+            },
+            "ref": {
+              ".validate": "newData.isString() && newData.val().length <= 600"
+            },
+            "title": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "label": {
+              ".validate": "newData.isString() && newData.val().length <= 24"
+            },
+            "at": {
+              ".validate": "newData.isNumber()"
+            },
+            "subs": {
+              "$i": {
+                "key": {
+                  ".validate": "newData.isString() && newData.val().length <= 600"
+                },
+                "label": {
+                  ".validate": "newData.isString() && newData.val().length <= 40"
+                },
+                "$x": {
+                  ".validate": false
+                }
+              }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}
