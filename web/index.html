@@ -347,7 +347,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 }
 
 /* ------------------------------------------------------------- landing */
-#landing{display:none;min-height:100dvh;overflow-y:auto;overflow-x:hidden;background:#080808;color:var(--text)}
+#landing{display:none;min-height:100dvh;overflow:visible;overflow-x:hidden;background:#080808;color:var(--text)}
 #landing.on{display:block}
 .landing-wrap{width:100%;margin:0 auto;padding:0 0 70px}
 .netflix-nav{position:sticky;top:0;z-index:30;height:66px;display:flex;align-items:center;gap:28px;padding:0 clamp(18px,4vw,54px);background:linear-gradient(180deg,rgba(5,5,5,.98),rgba(5,5,5,.78),transparent);backdrop-filter:blur(8px)}
@@ -403,9 +403,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 .netflix-hero-actions .btn.ghost:hover{background:#232b37;border-color:#4a596d;}
 .netflix-section{scroll-margin-top:78px;}
 .netflix-section-head h2{color:#f4f7fb;}
-.netflix-section-head span{color:#8995a7;}
+.netflix-section-head span{display:none;}
 .netflix-row,.netflix-rooms{overscroll-behavior-inline:contain;}
-.netflix-card{border:1px solid rgba(255,255,255,.06);outline:none;}
+.netflix-card{border:1px solid rgba(255,255,255,.06);outline:none;pointer-events:auto;cursor:pointer;position:relative;z-index:1;}
 .netflix-card:focus-visible{box-shadow:0 0 0 3px #5eead4,0 16px 34px rgba(0,0,0,.55);}
 .netflix-card-shade{position:absolute;z-index:1;inset:35% 0 0;background:linear-gradient(180deg,transparent 0%,rgba(0,0,0,.86) 100%);pointer-events:none;}
 .poster-fallback{color:#eef2f7;background:radial-gradient(circle at 30% 20%,#2b3544,#0e1218 70%);}
@@ -501,23 +501,23 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 
     <main class="netflix-main">
       <section class="netflix-section" id="continueSection" hidden>
-        <div class="netflix-section-head"><h2>Continue watching</h2><span>Your saved rooms</span></div>
+        <div class="netflix-section-head"><h2>Continue watching</h2></div>
         <div class="netflix-rooms" id="continueRow"></div>
       </section>
 
       <section class="netflix-section" id="moviesSection" hidden>
-        <div class="netflix-section-head"><h2>Movies</h2><span>From your library</span></div>
+        <div class="netflix-section-head"><h2>Movies</h2></div>
         <div class="netflix-row" id="moviesRow"></div>
       </section>
 
       <section class="netflix-section" id="seriesSection" hidden>
-        <div class="netflix-section-head"><h2>Series</h2><span>Episodes ready to watch</span></div>
+        <div class="netflix-section-head"><h2>Series</h2></div>
         <div class="netflix-row" id="seriesRow"></div>
         <div id="libraryInlineExpand" class="library-inline-expand" hidden></div>
       </section>
 
       <section class="netflix-section" id="allSection">
-        <div class="netflix-section-head"><h2>My Library</h2><span id="libraryCount">0 titles</span></div>
+        <div class="netflix-section-head"><h2>My Library</h2></div>
         <div class="netflix-row" id="allRow"></div>
       </section>
 

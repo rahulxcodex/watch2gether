@@ -131,7 +131,8 @@ function normalizeLibraryMediaTypes() {
     // Early versions did not persist season/episode numbers, so that heuristic
     // incorrectly converted whole TV libraries into movies. An explicit media
     // type or the legacy "Movie" code is safe evidence; otherwise default to TV.
-    const inferredMovie = series.mediaType === "movie" ||
+    const legacyMovieName = /\s[—-]\s*movie\s*$/i.test(String(series.name || ""));
+    const inferredMovie = series.mediaType === "movie" || legacyMovieName ||
       (Array.isArray(series.episodes) && series.episodes.length &&
        series.episodes.every((e) => e.mediaType === "movie" || e.episodeCode === "Movie"));
     const nextSeriesType = inferredMovie ? "movie" : "series";
@@ -920,6 +921,25 @@ function tmdbArt(series) {
   return TMDB_CACHE[key] || null;
 }
 
+async function fetchLibraryArtworkFallback(series) {
+  const key = `fallback:${String(series.imdbId || series.name || series.id || "").toLowerCase()}`;
+  if (!key.slice(9)) return null;
+  if (TMDB_INFLIGHT.has(key)) return TMDB_INFLIGHT.get(key);
+  const req = (async () => {
+    try {
+      const p = new URLSearchParams({ title: series.name || "" });
+      if (series.imdbId) p.set("imdbId", series.imdbId);
+      p.set("type", mediaTypeOf(series) === "movie" ? "movie" : "tv");
+      const r = await fetch(`/api/tmdb?fallback=1&${p.toString()}`);
+      const data = await r.json().catch(() => ({}));
+      return data?.ok ? data : null;
+    } catch { return null; }
+    finally { TMDB_INFLIGHT.delete(key); }
+  })();
+  TMDB_INFLIGHT.set(key, req);
+  return req;
+}
+
 async function fetchTmdbArt(series, force = false) {
   const key = String(series.imdbId || series.name || series.id || "").toLowerCase();
   if (!key) return null;
@@ -939,6 +959,8 @@ async function fetchTmdbArt(series, force = false) {
       if (!r.ok || !data?.ok) {
         if (r.status === 503) tmdbUnavailable = true;
         TMDB_FAILED.set(key, Date.now());
+        const fallback = await fetchLibraryArtworkFallback(series);
+        if (fallback) { TMDB_CACHE[key] = fallback; saveTmdbCache(); return fallback; }
         return null;
       }
       TMDB_FAILED.delete(key);
@@ -947,6 +969,8 @@ async function fetchTmdbArt(series, force = false) {
       return data;
     } catch {
       TMDB_FAILED.set(key, Date.now());
+      const fallback = await fetchLibraryArtworkFallback(series);
+      if (fallback) { TMDB_CACHE[key] = fallback; saveTmdbCache(); return fallback; }
       return null;
     } finally {
       TMDB_INFLIGHT.delete(key);
@@ -1111,10 +1135,10 @@ async function hydrateLibraryArt() {
 }
 
 function posterUrl(art, size = "w342") {
-  return art?.posterPath ? `${TMDB_IMG}${size}${art.posterPath}` : "";
+  return art?.posterUrl || (art?.posterPath ? `${TMDB_IMG}${size}${art.posterPath}` : "");
 }
 function backdropUrl(art, size = "w1280") {
-  return art?.backdropPath ? `${TMDB_IMG}${size}${art.backdropPath}` : "";
+  return art?.backdropUrl || (art?.backdropPath ? `${TMDB_IMG}${size}${art.backdropPath}` : "");
 }
 function titleMeta(series) {
   const art = tmdbArt(series);
@@ -1220,7 +1244,10 @@ function renderNetflixCard(series) {
   info.innerHTML = `<b>${esc(series.name || "Untitled")}</b><span>${esc(meta || type)}</span>`;
   card.append(shade, info);
   const open = () => mediaTypeOf(series) === "movie" ? openLibraryDetail(series) : openInlineSeries(series);
-  card.addEventListener("click", open);
+  card.addEventListener("click", (e) => {
+    if (card.dataset.dragMoved === "1") { card.dataset.dragMoved = "0"; return; }
+    open();
+  });
   card.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
   });
@@ -1253,7 +1280,11 @@ function setupNetflixRows() {
     row.addEventListener("pointermove", (e) => {
       if (!down) return;
       const dx = e.clientX - startX;
-      if (Math.abs(dx) > 5) moved = true;
+      if (Math.abs(dx) > 5) {
+        moved = true;
+        const el = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".netflix-card");
+        if (el) el.dataset.dragMoved = "1";
+      }
       row.scrollLeft = startScroll - dx;
     });
     const end = () => { down = false; row.classList.remove("is-dragging"); };
@@ -1596,19 +1627,40 @@ $("#landingAddBtn").onclick = () => {
 };
 $("#libraryFormClose")?.addEventListener("click", () => { $("#libraryFormOverlay").hidden = true; });
 function scrollLandingTo(selector) {
-  const landing = $("#landing");
   const target = $(selector);
-  if (!landing || !target || target.hidden) return;
-  const top = Math.max(0, target.offsetTop - 72);
-  landing.scrollTo({ top, behavior: "smooth" });
+  if (!target || target.hidden) return;
+  const top = Math.max(0, target.getBoundingClientRect().top + window.scrollY - 76);
+  window.scrollTo({ top, behavior: "smooth" });
 }
-$("#navHome")?.addEventListener("click", () => {
-  if (!$("#landing")?.classList.contains("on")) showLanding();
-  else $("#landing").scrollTo({ top: 0, behavior: "smooth" });
+$("#navHome")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  if (!$("#landing")?.classList.contains("on")) { showLanding(); }
+  window.scrollTo({ top: 0, behavior: "smooth" });
 });
-$("#navMovies")?.addEventListener("click", () => scrollLandingTo("#moviesSection"));
-$("#navSeries")?.addEventListener("click", () => scrollLandingTo("#seriesSection"));
-$("#navRooms")?.addEventListener("click", () => scrollLandingTo("#roomsSection"));
+$("#navMovies")?.addEventListener("click", (e) => { e.preventDefault(); scrollLandingTo("#moviesSection"); });
+$("#navSeries")?.addEventListener("click", (e) => { e.preventDefault(); scrollLandingTo("#seriesSection"); });
+$("#navRooms")?.addEventListener("click", (e) => { e.preventDefault(); scrollLandingTo("#roomsSection"); });
+
+// Event delegation keeps cards and navigation clickable even after re-renders.
+document.addEventListener("click", (e) => {
+  const nav = e.target.closest?.("#navHome,#navMovies,#navSeries,#navRooms");
+  if (nav) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (nav.id === "navHome") { window.scrollTo({ top: 0, behavior: "smooth" }); }
+    else if (nav.id === "navMovies") scrollLandingTo("#moviesSection");
+    else if (nav.id === "navSeries") scrollLandingTo("#seriesSection");
+    else if (nav.id === "navRooms") scrollLandingTo("#roomsSection");
+    return;
+  }
+  const card = e.target.closest?.(".netflix-card");
+  if (card && !card.dataset.dragMoved) {
+    const id = card.dataset.libraryId;
+    const item = MY_LIBRARY.find(x => String(x.id) === String(id));
+    if (item) { e.preventDefault(); e.stopPropagation(); mediaTypeOf(item) === "movie" ? openLibraryDetail(item) : openInlineSeries(item); }
+  }
+}, true);
+
 $("#librarySeriesSelect").onchange = syncSeriesFields;
 
 /* Movies don't have seasons/episodes, so checking "This is a movie" hides
