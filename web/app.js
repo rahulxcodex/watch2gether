@@ -277,6 +277,7 @@ async function addLibraryEpisode(form) {
   const episodeOverride = String(fd.get("episode") || "").trim();
   const url = String(fd.get("url") || "").trim();
   const imdbId = String(fd.get("imdbId") || "").trim().toLowerCase();
+  const isMovie = fd.get("isMovie") === "on" || fd.get("isMovie") === "true";
   const seasonRaw = String(fd.get("seasonNumber") || "").trim();
   const episodeRaw = String(fd.get("episodeNumber") || "").trim();
   const season = /^\d+$/.test(seasonRaw) ? Number(seasonRaw) : null;
@@ -286,15 +287,15 @@ async function addLibraryEpisode(form) {
 
   if (!seriesName) return say("Enter a series name.");
   if (!/^tt\d{7,10}$/i.test(imdbId)) return say("Enter a valid IMDb ID such as tt1234567.");
-  if (season == null || season < 1) return say("Enter a valid season number.");
-  if (epNo == null || epNo < 1) return say("Enter a valid episode number.");
+  if (!isMovie && (season == null || season < 1)) return say("Enter a valid season number.");
+  if (!isMovie && (epNo == null || epNo < 1)) return say("Enter a valid episode number.");
   if (!url || !/^https?:\/\//i.test(url)) return say("Enter a valid http(s) episode URL.");
   if (!parseSource(url)) return say("That doesn't look like a playable video or HLS URL.");
   if (subtitleUrl && !/^https?:\/\//i.test(subtitleUrl)) return say("Subtitle URL must start with http:// or https://.");
   if (subtitleUrl && subtitleFile?.size) return say("Use either a subtitle URL or an uploaded subtitle file, not both.");
   if (subtitleFile?.size > 1500000) return say("Subtitle file is larger than 1.5 MB.");
 
-  const generatedCode = `S${String(season).padStart(2, "0")}E${String(epNo).padStart(2, "0")}`;
+  const generatedCode = isMovie ? "Movie" : `S${String(season).padStart(2, "0")}E${String(epNo).padStart(2, "0")}`;
 
   const submit = form.querySelector('button[type="submit"]');
   const oldText = submit?.textContent;
@@ -334,7 +335,9 @@ async function addLibraryEpisode(form) {
       // episode. Falls back to asking the user to upload a file if that
       // download comes up empty.
       if (submit) submit.textContent = "Finding subtitles…";
-      const auto = await autoImportEpisodeSubtitle(imdbId, season, epNo);
+      const auto = isMovie
+        ? await autoImportMovieSubtitle(imdbId)
+        : await autoImportEpisodeSubtitle(imdbId, season, epNo);
       if (auto.ok) {
         subtitleText = auto.text;
         subtitleFileName = auto.fileName;
@@ -458,6 +461,7 @@ async function addLibraryEpisode(form) {
 
     writeLibrary();
     form.reset();
+    syncMovieFields();
     $("#libraryFormWrap").hidden = true;
     const subMsg = subtitleSource === "OpenSubtitles (auto)"
       ? "English subtitles auto-downloaded from OpenSubtitles"
@@ -501,6 +505,38 @@ async function autoImportEpisodeSubtitle(imdbId, season, episodeNumber) {
       ok: true,
       text: String(file.text),
       fileName: String(file.fileName || `S${String(season).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}.srt`).slice(-180),
+    };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+/* Same as autoImportEpisodeSubtitle above, but for movies. Movies aren't
+ * organized by season/episode on OpenSubtitles, so this hits /api/opensubs
+ * with `movie: true` instead of seasonNumber/episodeNumbers — sending a
+ * movie's IMDb id through the season/episode path always came back empty,
+ * since that id was never registered as a TV "parent" id server-side. */
+async function autoImportMovieSubtitle(imdbId) {
+  try {
+    const r = await fetch("/api/opensubs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url: `https://www.opensubtitles.org/en/search/imdbid-${imdbId.replace(/^tt/i, "")}`,
+        imdbId,
+        movie: true,
+      }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, error: body.error || `OpenSubtitles API returned HTTP ${r.status}.` };
+    const file = Array.isArray(body.files) ? body.files[0] : null;
+    if (!file || !String(file.text || "").trim()) {
+      return { ok: false, error: body.error || "No English subtitle was found for this movie." };
+    }
+    return {
+      ok: true,
+      text: String(file.text),
+      fileName: String(file.fileName || "movie.srt").slice(-180),
     };
   } catch (e) {
     return { ok: false, error: String(e?.message || e) };
@@ -1015,6 +1051,32 @@ $("#landingAddBtn").onclick = () => {
   else $("#libraryFormWrap").hidden = true;
 };
 $("#librarySeriesSelect").onchange = syncSeriesFields;
+
+/* Movies don't have seasons/episodes, so checking "This is a movie" hides
+ * those two fields and drops their `required` attribute instead of forcing
+ * the user to type placeholder "1"s that then get treated as a real
+ * S01E01 episode (which also sent movie subtitle lookups down the TV
+ * season/episode search path — see autoImportEpisodeSubtitle). */
+function syncMovieFields() {
+  const isMovie = $("#libraryIsMovie")?.checked;
+  const seasonField = $("#seasonField");
+  const episodeField = $("#episodeField");
+  const seasonInput = seasonField?.querySelector("input");
+  const episodeInput = episodeField?.querySelector("input");
+  const note = $("#autoSubNote");
+  if (!seasonField || !episodeField) return;
+  seasonField.hidden = isMovie;
+  episodeField.hidden = isMovie;
+  if (seasonInput) seasonInput.required = !isMovie;
+  if (episodeInput) episodeInput.required = !isMovie;
+  if (note) {
+    note.textContent = isMovie
+      ? "Parallel pulls the best matching English subtitle for this movie straight from OpenSubtitles using its IMDb ID — no separate lookup step. If none is found, you'll be asked whether to upload a file by hand instead."
+      : "Since you already entered the season and episode number, Parallel pulls the best matching English subtitle for that exact episode straight from OpenSubtitles — no separate lookup step. If none is found, you'll be asked whether to upload a file by hand instead.";
+  }
+}
+$("#libraryIsMovie")?.addEventListener("change", syncMovieFields);
+syncMovieFields();
 $("#landingJoinBtn").onclick = () => showGate();
 $("#homeBtn").onclick = () => {
   // While connected to a room, just switch to the library view without a
@@ -1041,6 +1103,7 @@ $("#libraryForm").addEventListener("submit", (e) => {
 $("#libraryCancel").onclick = () => {
   $("#libraryFormWrap").hidden = true;
   $("#libraryForm").reset();
+  syncMovieFields();
   populateSeriesSelect();
 };
 
