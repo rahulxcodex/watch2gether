@@ -1203,8 +1203,7 @@ function renderInlineEpisode(series, ep, tmdbEp) {
   wrap.className = "inline-episode";
   const still = document.createElement("div");
   still.className = "inline-episode-still";
-  const stillPath = tmdbEp?.stillPath;
-  if (stillPath) still.style.backgroundImage = `url("${TMDB_IMG}w300${stillPath}")`;
+  setBackgroundWithFallback(still, episodeStillUrl(tmdbEp, "w300"));
   const copy = document.createElement("div");
   copy.className = "inline-episode-copy";
   const n = tmdbEp?.episodeNumber ?? ep?.episodeNumber;
@@ -1234,7 +1233,8 @@ async function openInlineSeries(series) {
   const art = tmdbArt(series);
   const genres = (art?.genres || []).map(g=>g.name).filter(Boolean).join(" · ");
   const cast = (art?.credits?.cast || []).slice(0,5).map(c=>c.name).filter(Boolean).join(", ");
-  panel.innerHTML = `<div class="inline-expand-hero" style="${backdropUrl(art)?`background-image:url("${backdropUrl(art)}")`:""}"><div class="inline-expand-copy"><h3>${esc(art?.title || series.name || "Series")}</h3><div class="inline-expand-meta">${tmdbRichMeta(series).map(x=>`<span>${esc(x)}</span>`).join("")}</div><p>${esc(art?.overview || series.summary || "No synopsis available.")}</p>${genres?`<div class="inline-expand-genres">${esc(genres)}</div>`:""}${cast?`<div class="inline-expand-cast"><b>Cast:</b> ${esc(cast)}</div>`:""}</div></div><div class="inline-expand-body"><div class="season-tabs" id="inlineSeasonTabs"><span class="inline-loading">Loading seasons…</span></div><div id="inlineSeasonContent"><div class="inline-loading">Loading…</div></div></div>`;
+  panel.innerHTML = `<div class="inline-expand-hero" id="inlineExpandHero"><div class="inline-expand-copy"><h3>${esc(art?.title || series.name || "Series")}</h3><div class="inline-expand-meta">${tmdbRichMeta(series).map(x=>`<span>${esc(x)}</span>`).join("")}</div><p>${esc(art?.overview || series.summary || "No synopsis available.")}</p>${genres?`<div class="inline-expand-genres">${esc(genres)}</div>`:""}${cast?`<div class="inline-expand-cast"><b>Cast:</b> ${esc(cast)}</div>`:""}</div></div><div class="inline-expand-body"><div class="season-tabs" id="inlineSeasonTabs"><span class="inline-loading">Loading seasons…</span></div><div id="inlineSeasonContent"><div class="inline-loading">Loading…</div></div></div>`;
+  setBackgroundWithFallback(panel.querySelector("#inlineExpandHero"), backdropUrl(art));
   const tabs = panel.querySelector("#inlineSeasonTabs");
   const content = panel.querySelector("#inlineSeasonContent");
   const seasons = seasonNumbers(series);
@@ -1305,6 +1305,39 @@ function posterUrl(art, size = "w342") {
 function backdropUrl(art, size = "w1280") {
   return art?.backdropUrl || (art?.backdropPath ? `${TMDB_IMG}${size}${art.backdropPath}` : "");
 }
+// stillPath can be either a bare TMDB path (needs the TMDB image host prefixed)
+// or, for Jikan/anime episodes, an already-absolute URL. Treating both the
+// same way (always prefixing TMDB_IMG) produces a mangled URL for anime and
+// silently fails to load - this resolves that ambiguity in one place.
+function episodeStillUrl(tmdbEp, size = "w300") {
+  if (!tmdbEp) return "";
+  if (tmdbEp.stillUrl) return tmdbEp.stillUrl;
+  if (tmdbEp.stillPath) return /^https?:\/\//i.test(tmdbEp.stillPath) ? tmdbEp.stillPath : `${TMDB_IMG}${size}${tmdbEp.stillPath}`;
+  return "";
+}
+// CSS background-image has no load/error events, so a broken or blocked
+// image URL just silently renders as a blank/black box with zero feedback.
+// This preloads the URL with a real Image() first and only applies it (or
+// falls back to a placeholder) once we actually know whether it loaded.
+function setBackgroundWithFallback(el, url, fallbackLabel = "") {
+  if (!el) return;
+  el.classList.remove("bg-fallback");
+  el.style.backgroundImage = "";
+  // Only leaf placeholder boxes (no element children, e.g. episode stills)
+  // get their text replaced; containers like the hero keep their copy.
+  const isLeaf = el.children.length === 0;
+  if (isLeaf) el.textContent = "";
+  if (!url) {
+    if (fallbackLabel && isLeaf) { el.classList.add("bg-fallback"); el.textContent = fallbackLabel; }
+    return;
+  }
+  const probe = new Image();
+  probe.onload = () => { el.style.backgroundImage = `url("${url}")`; };
+  probe.onerror = () => {
+    if (fallbackLabel && isLeaf) { el.classList.add("bg-fallback"); el.textContent = fallbackLabel; }
+  };
+  probe.src = url;
+}
 function titleMeta(series) {
   const art = tmdbArt(series);
   const type = mediaTypeOf(series) === "movie" ? "Movie" : "Series";
@@ -1322,7 +1355,7 @@ async function openLibraryDetail(series) {
   }
   const hero = $("#libraryDetailHero");
   const heroImage = backdropUrl(art) || posterUrl(art, "w1280");
-  hero.style.backgroundImage = heroImage ? `url("${heroImage}")` : "";
+  setBackgroundWithFallback(hero, heroImage);
   $("#libraryDetailTitle").textContent = art?.title || series.name || "Untitled";
   $("#libraryDetailSummary").textContent = art?.overview || series.summary || "No synopsis available.";
   const isMovie = mediaTypeOf(series) === "movie";
@@ -1420,8 +1453,8 @@ async function openLibraryDetail(series) {
 
 function renderDetailEpisode(series, ep, tmdbEp, movie=false) {
   const row=document.createElement("div"); row.className="detail-episode";
-  const artUrl=tmdbEp?.stillUrl || (tmdbEp?.stillPath ? `${TMDB_IMG}w300${tmdbEp.stillPath}` : "");
-  const art=document.createElement("div"); art.className="detail-episode-art"; if(artUrl) art.style.backgroundImage=`url("${artUrl}")`;
+  const artUrl=episodeStillUrl(tmdbEp, "w300");
+  const art=document.createElement("div"); art.className="detail-episode-art"; setBackgroundWithFallback(art, artUrl);
   const copy=document.createElement("div"); copy.className="detail-episode-copy";
   const n=movie?"Movie":`S${String(tmdbEp?.seasonNumber ?? ep?.seasonNumber ?? 1).padStart(2,"0")}E${String(tmdbEp?.episodeNumber ?? ep?.episodeNumber ?? 1).padStart(2,"0")}`;
   const title=tmdbEp?.name || ep?.title || n;
@@ -1582,7 +1615,7 @@ function renderLanding() {
     heroTitle.textContent = h.name || "Your library";
     heroSummary.textContent = h.summary || art?.overview || "Pick a title and watch together.";
     heroMeta.innerHTML = titleMeta(h).map((m, i) => `<span${m.startsWith("★") ? ' class="rating"' : ""}>${esc(m)}</span>`).join("");
-    heroBackdrop.style.backgroundImage = back ? `url("${back}")` : "";
+    setBackgroundWithFallback(heroBackdrop, back);
     $("#libraryHeroWatch").disabled = !(h.episodes || []).some((e) => e.url);
     $("#libraryHeroWatch").onclick = () => {
       const ep = (h.episodes || []).find((e) => e.url);
