@@ -186,13 +186,38 @@ function openRoom(code) {
   showGate(code);
 }
 
-function watchLibraryEpisode(series, ep) {
+async function watchLibraryEpisode(series, ep) {
+  let episodeUrl = String(ep.url || "").trim();
+
+  // Older library entries created before URL persistence may not have ep.url.
+  // Offer a one-time repair instead of sending undefined to Firebase.
+  if (!episodeUrl) {
+    const repaired = await ask({
+      title: "Episode link missing",
+      body: `This saved episode was created by an older library version that did not store its stream URL. Paste the episode .m3u8/direct-video link to repair it.`,
+      value: "",
+      ok: "Save & watch",
+    });
+    if (!repaired || !/^https?:\/\//i.test(repaired)) {
+      if (repaired != null) say("Please enter a valid http(s) episode link.");
+      return;
+    }
+    if (!parseSource(repaired)) return say("That doesn't look like a playable video or HLS URL.");
+    ep.url = repaired;
+    writeLibrary();
+    episodeUrl = repaired;
+  }
+
+  const parsed = parseSource(episodeUrl);
+  if (!parsed) return say("This episode has an invalid or unsupported stream link.");
+
   const existing = SAVED_ROOMS.find((r) => r.episodeId === ep.id);
   const code = existing?.code || roll();
+
   R.pendingSource = {
-    kind: parseSource(ep.url)?.kind || "url",
-    ref: ep.url,
-    title: `${series.name} — ${ep.title}`,
+    kind: parsed.kind,
+    ref: episodeUrl,
+    title: `${series.name} — ${ep.title || parsed.title || "Episode"}`,
     label: "Library",
     subs: ep.subtitleText
       ? [{ key: "local", label: ep.subtitleLanguage || "English" }]
@@ -201,6 +226,7 @@ function watchLibraryEpisode(series, ep) {
     subtitleName: ep.subtitleFileName || "",
     size: 0,
   };
+
   $("#code").value = code;
   showGate(code);
   if ($("#who").value) join();
@@ -310,6 +336,7 @@ async function addLibraryEpisode(form) {
 
     const duplicate = series.episodes.find((e) => e.url === url);
     const episodePatch = {
+      url,
       title, seasonNumber: season, episodeNumber: epNo, episodeCode: generatedCode,
       episodeImdbId: meta.episodeImdbId || null, episodeImdbUrl: meta.episodeImdbUrl || null,
       episodeImdbRating: typeof meta.episodeImdbRating === "number" ? meta.episodeImdbRating : null,
@@ -1189,18 +1216,27 @@ function hostOf(u) {
 }
 
 function setSource(src, startAt = 0) {
-  ctl({
-    kind: src.kind,
-    ref: src.ref,
-    title: src.title || "Untitled",
-    label: src.label || "",
-    size: src.size || 0,
-    subs: src.subs || [],
-    subtitleText: src.subtitleText || "",
-    subtitleName: src.subtitleName || "",
+  const kind = String(src?.kind || "");
+  const ref = String(src?.ref || "").trim();
+
+  if (!kind || !ref) {
+    return say("This source has no playable link. Re-add the episode link from the library.");
+  }
+
+  const patch = {
+    kind,
+    ref,
+    title: String(src?.title || "Untitled"),
+    label: String(src?.label || ""),
+    size: Number(src?.size || 0),
+    subs: Array.isArray(src?.subs) ? src.subs : [],
+    subtitleText: String(src?.subtitleText || ""),
+    subtitleName: String(src?.subtitleName || ""),
     playing: false,
-    pos: startAt || 0,
-  });
+    pos: Number(startAt || 0),
+  };
+
+  ctl(patch);
 }
 
 /* --------------------------------------------------------- local files
@@ -1224,6 +1260,57 @@ function adoptLocal(f) {
   LOCAL.file = f;
   LOCAL.url = URL.createObjectURL(f);
 }
+
+/* Upload a subtitle while already inside a room. The subtitle text is stored
+ * in the shared room state, so the other viewer gets the same track too.
+ *
+ * This uses its own #subPick input rather than the library's #upPick — the
+ * two used to share one input/onchange pair, and whichever assignment ran
+ * last (library uploads, below) silently won and swallowed subtitle picks,
+ * so "Upload subtitle" quietly stopped syncing to the room. */
+$("#subPick").onchange = async (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = "";
+  if (!f) return;
+
+  if (f.size > 1500000) {
+    return say("Subtitle file is larger than 1.5 MB.");
+  }
+
+  const name = f.name || "subtitle.srt";
+  if (!/\.(srt|vtt|ass|ssa)$/i.test(name)) {
+    return say("Use an .srt, .vtt, .ass, or .ssa subtitle file.");
+  }
+
+  try {
+    const text = await f.text();
+    const cues = parseSubs(text);
+    if (!cues.length) {
+      return say("That subtitle file doesn't contain readable SRT/VTT/ASS/SSA cues.");
+    }
+
+    R.localSub = {
+      label: name.replace(/\.[^.]+$/, "").slice(0, 24) || "English",
+      cues,
+    };
+    R.cueTrack = "local";
+    setCues(cues);
+
+    // Keep the subtitle in the shared room state. This also makes it survive
+    // when another viewer joins or the source is remounted.
+    ctl({
+      subtitleText: text,
+      subtitleName: name.slice(0, 120),
+      subs: [{ key: "local", label: "English" }],
+    });
+
+    drawTracks();
+    say(`Loaded ${name} — subtitles are now shared in this room.`);
+  } catch (err) {
+    console.error(err);
+    say("Couldn't read that subtitle file.");
+  }
+};
 
 function loadLocal(src) {
   if (LOCAL.file && LOCAL.file.name === src.ref) {
@@ -1562,6 +1649,12 @@ function drawTracks() {
   if (!box) return;
   box.innerHTML = "";
 
+  const upload = document.createElement("button");
+  upload.className = "chip";
+  upload.textContent = "Upload subtitle";
+  upload.onclick = () => $("#subPick").click();
+  box.appendChild(upload);
+
   const off = document.createElement("button");
   off.className = "chip" + (R.cueTrack ? "" : " on");
   off.textContent = "Off";
@@ -1601,7 +1694,7 @@ function drawTracks() {
   if (!R.localSub && !(R.state?.subs || []).length && PL.kind !== "yt") {
     const n = document.createElement("span");
     n.style.cssText = "font-size:12px;color:var(--dimmer);align-self:center";
-    n.textContent = "Drop an .srt on the panel to add one.";
+    n.textContent = "Upload an SRT, VTT, ASS, or SSA subtitle.";
     box.appendChild(n);
   }
 }
