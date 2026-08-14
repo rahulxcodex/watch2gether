@@ -21,6 +21,34 @@ function cleanList(arr, n = 20) {
   return Array.isArray(arr) ? arr.slice(0, n).map((x) => clean(x, 100)).filter(Boolean) : [];
 }
 
+/**
+ * Low-level TMDB request helper. This was missing entirely, which meant every
+ * call site below (findTitle, the season lookup, the by-id lookup) threw a
+ * ReferenceError at runtime. The try/catch in the handler swallowed that and
+ * returned a 502, which is why posters/backdrops never loaded and the
+ * library UI looked broken (no art, no hero image, hydration silently
+ * failing on every title).
+ */
+async function tmdb(path, params = {}) {
+  const url = new URL(`${TMDB_BASE}${path}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers = { accept: "application/json" };
+  if (READ_TOKEN) {
+    headers.Authorization = `Bearer ${READ_TOKEN}`;
+  } else if (API_KEY) {
+    url.searchParams.set("api_key", API_KEY);
+  }
+  const r = await fetch(url.toString(), { headers });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const message = data?.status_message || `TMDB HTTP ${r.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
 function normalize(x, type) {
   if (!x) return null;
   return {
