@@ -2629,15 +2629,32 @@ function showSurface(which) {
   if (which === "none") { v.removeAttribute("src"); v.load?.(); }
   $("#syncNote").textContent = which === "yt"
     ? "YouTube only accepts fixed playback speeds, so drift here is corrected by seeking rather than by easing the rate."
-    : "Drift under 0.12s is left alone; beyond that the speed leans by up to 14% until it closes.";
+    : "Drift under 0.3s is left alone; up to 0.8s gets a barely-there speed lean, up to 2s a stronger one, and only a bigger gap triggers a seek. Thresholds widen automatically on a struggling connection.";
   $("#ccNote").textContent = which === "yt"
     ? "YouTube's own captions can't be restyled from outside. Drop an .srt onto the panel to use one these settings apply to."
     : "";
 }
 
 /* ======================================================== the sync loop */
+/* Smart Sync 2.0 — a tiered response instead of one flat deadband:
+ *
+ *   0.0 – 0.3s   do nothing (sub-perceptible, chasing it just wastes cycles)
+ *   0.3 – 0.8s   a barely-there playback-rate lean
+ *   0.8 – 2.0s   a stronger rate lean, converges faster
+ *   > 2.0s       seek (after a short persistence check)
+ *   > 5.0s       immediate hard resync, bypasses the seek cooldown entirely
+ *
+ * A human closing a gap with someone would nudge for a stumble, jog to close
+ * a real lead, and only teleport once a gap is embarrassing. Same idea here.
+ */
 
-const SOFT = 0.12, HARD = 2.0, GAIN = 0.35, CAP = 0.14;
+const T_IGNORE = 0.3;   // below this: leave it alone
+const T_SOFT   = 0.8;   // 0.3–0.8s boundary
+const T_HARD   = 2.0;   // 0.8–2s boundary; above this we seek
+const T_PANIC  = 5.0;   // above this: seek right now, no cooldown, no streak
+
+const GAIN_SOFT = 0.15, CAP_SOFT = 0.06;   // tier 2 lean
+const GAIN_HARD = 0.45, CAP_HARD = 0.20;   // tier 3 lean
 const YT_TOL = 0.7;
 
 // A hard seek forces a network read; firing another one before that read has
@@ -2650,6 +2667,34 @@ const SEEK_COOLDOWN = 3000;
 const HARD_STREAK = 2;
 let lastSeekAt = 0;
 let hardStreak = 0;
+
+/* ---------------------------------------------------- network-aware mode
+ * A room on a shaky connection stalls often; chasing drift on it as
+ * aggressively as a healthy connection just layers seeks on top of stalls
+ * it's already fighting, which is how one hiccup turns into a stuck loop.
+ * When stalls are happening frequently (or the browser reports a bad
+ * connection), widen every deadband and lengthen the seek cooldown so the
+ * loop backs off and lets the connection catch up instead of fighting it.
+ */
+const STALL_WINDOW_MS = 30000;
+const STALL_STRUGGLE_COUNT = 3;
+const STRUGGLE_MULT = 1.8;
+let stallTimestamps = [];
+let wasStalled = false;
+
+function noteStallTransition(isStalledNow) {
+  if (isStalledNow && !wasStalled) stallTimestamps.push(Date.now());
+  wasStalled = isStalledNow;
+}
+
+function networkStruggling() {
+  const cutoff = Date.now() - STALL_WINDOW_MS;
+  stallTimestamps = stallTimestamps.filter((t) => t > cutoff);
+  if (stallTimestamps.length >= STALL_STRUGGLE_COUNT) return true;
+  const conn = navigator.connection;
+  if (conn && (conn.saveData || /2g/.test(conn.effectiveType || ""))) return true;
+  return false;
+}
 
 setInterval(sync, 1000);
 
@@ -2665,24 +2710,32 @@ function sync() {
     return;                       // don't chase a position inside someone's ad
   }
 
+  const stalledNow = PL.stalled();
+  noteStallTransition(stalledNow);
+
   // Already rebuffering locally: let it recover on its own rather than
   // piling a seek on top of a stall. Seeking mid-stall just cancels the
   // in-flight fetch and restarts it, which is the seek-storm that turns one
-  // hiccup into a long stuck-and-buffering stretch.
-  if (PL.stalled()) {
+  // hiccup into a long stuck-and-buffering stretch. Never sync while
+  // buffering, full stop.
+  if (stalledNow) {
     hardStreak = 0;
     $("#driftVal").textContent = fmtDrift(expectedPos() - PL.time());
     return;
   }
 
+  const struggling = networkStruggling();
+  const mult = struggling ? STRUGGLE_MULT : 1;
+  const cooldown = struggling ? SEEK_COOLDOWN * 2 : SEEK_COOLDOWN;
+
   const want = expectedPos();
   const drift = want - PL.time();
-  $("#driftVal").textContent = fmtDrift(drift);
+  $("#driftVal").textContent = fmtDrift(drift) + (struggling ? " (net)" : "");
 
   if (!s.playing) {
     hardStreak = 0;
     if (!PL.paused()) PL.pause();
-    if (Math.abs(drift) > 0.25 && Date.now() - lastSeekAt > SEEK_COOLDOWN) {
+    if (Math.abs(drift) > T_SOFT * mult && Date.now() - lastSeekAt > cooldown) {
       PL.seek(want);
       lastSeekAt = Date.now();
     }
@@ -2694,16 +2747,27 @@ function sync() {
     PL.play()?.catch(() => { R.blocked = true; $("#tap").classList.add("on"); });
   }
 
-  if (Date.now() - lastSeekAt < SEEK_COOLDOWN) return; // let the last seek settle
+  // A genuinely huge gap (tab was backgrounded, a long stall just cleared,
+  // someone just joined) is unambiguous and worth fixing immediately —
+  // don't make it wait out a cooldown meant for telling noise from a real
+  // gap apart.
+  if (Math.abs(drift) > T_PANIC) {
+    PL.seek(want);
+    lastSeekAt = Date.now();
+    hardStreak = 0;
+    return;
+  }
+
+  if (Date.now() - lastSeekAt < cooldown) return; // let the last seek settle
 
   if (PL.kind === "yt") {
     // No fine speed control available, so hold a wider deadband and jump.
-    if (Math.abs(drift) > YT_TOL) { PL.seek(want); lastSeekAt = Date.now(); }
+    if (Math.abs(drift) > YT_TOL * mult) { PL.seek(want); lastSeekAt = Date.now(); }
     PL.setRate(s.rate);
     return;
   }
 
-  if (Math.abs(drift) > HARD) {
+  if (Math.abs(drift) > T_HARD * mult) {
     // Require the gap to persist across a couple of ticks before seeking:
     // a single tick right after a stall clears is often stale.
     if (++hardStreak >= HARD_STREAK) {
@@ -2713,10 +2777,12 @@ function sync() {
     }
   } else {
     hardStreak = 0;
-    if (Math.abs(drift) > SOFT) {
-      // Behind -> run slightly fast; ahead -> slightly slow. Converges in a
-      // few seconds and stays inaudible as long as the gain is capped.
-      PL.setRate(clamp(s.rate * (1 + clamp(drift * GAIN, -CAP, CAP)), 0.25, 4));
+    if (Math.abs(drift) > T_SOFT * mult) {
+      // 0.8–2s: lean harder, converges faster.
+      PL.setRate(clamp(s.rate * (1 + clamp(drift * GAIN_HARD, -CAP_HARD, CAP_HARD)), 0.25, 4));
+    } else if (Math.abs(drift) > T_IGNORE * mult) {
+      // 0.3–0.8s: barely-there lean, stays inaudible.
+      PL.setRate(clamp(s.rate * (1 + clamp(drift * GAIN_SOFT, -CAP_SOFT, CAP_SOFT)), 0.25, 4));
     } else {
       PL.setRate(s.rate);
     }
