@@ -342,7 +342,7 @@ async function addLibraryEpisode(form) {
   const episodeOverride = String(fd.get("episode") || "").trim();
   const url = String(fd.get("url") || "").trim();
   const imdbId = String(fd.get("imdbId") || "").trim().toLowerCase();
-  const isMovie = fd.get("isMovie") === "on" || fd.get("isMovie") === "true";
+  const isMovie = String(fd.get("mediaType") || "series") === "movie";
   const seasonRaw = String(fd.get("seasonNumber") || "").trim();
   const episodeRaw = String(fd.get("episodeNumber") || "").trim();
   const season = /^\d+$/.test(seasonRaw) ? Number(seasonRaw) : null;
@@ -889,7 +889,8 @@ async function saveEpisodeEdit(form) {
 
     writeLibrary();
     $("#episodeEditOverlay").hidden = true;
-    $("#libraryDetail").hidden = true;
+    const detailWasOpen = !$("#libraryDetail").hidden;
+    if (detailWasOpen) await openLibraryDetail(series);
     const subMsg = downloadAgain && ep.subtitleText ? " · English subtitles updated" : "";
     say(`${series.name} — ${ep.title} · ${newCode} saved${subMsg}`);
   } finally {
@@ -1313,17 +1314,22 @@ function titleMeta(series) {
     .filter(Boolean);
 }
 
-function openLibraryDetail(series) {
+async function openLibraryDetail(series) {
   activeLibraryTitle = series;
-  const art = tmdbArt(series);
+  let art = tmdbArt(series);
+  if (!art) {
+    art = await fetchTmdbArt(series);
+  }
   const hero = $("#libraryDetailHero");
-  hero.style.backgroundImage = backdropUrl(art) ? `url("${backdropUrl(art)}")` : "";
-  $("#libraryDetailTitle").textContent = series.name || "Untitled";
-  $("#libraryDetailSummary").textContent = series.summary || art?.overview || "";
+  const heroImage = backdropUrl(art) || posterUrl(art, "w1280");
+  hero.style.backgroundImage = heroImage ? `url("${heroImage}")` : "";
+  $("#libraryDetailTitle").textContent = art?.title || series.name || "Untitled";
+  $("#libraryDetailSummary").textContent = art?.overview || series.summary || "No synopsis available.";
+  const isMovie = mediaTypeOf(series) === "movie";
+  const body = $(".library-detail-body");
   const list = $("#libraryDetailEpisodes");
   list.innerHTML = "";
-  const isMovie = mediaTypeOf(series) === "movie";
-  $("#libraryDetailHeading").textContent = isMovie ? "Movie" : "Episodes";
+  $("#libraryDetailHeading").textContent = isMovie ? "Movie" : "Seasons & Episodes";
   const addBtn = $("#libraryDetailAdd");
   if (addBtn) {
     addBtn.textContent = isMovie ? "Edit movie" : "+ Add episode";
@@ -1337,36 +1343,93 @@ function openLibraryDetail(series) {
       }
     };
   }
-  for (const ep of (series.episodes || [])) {
-    const row = document.createElement("div");
-    row.className = "detail-episode";
-    const code = isMovie ? "Movie" : (ep.episodeCode || `S${String(ep.seasonNumber || 1).padStart(2, "0")}E${String(ep.episodeNumber || 1).padStart(2, "0")}`);
-    const info = document.createElement("div");
-    info.className = "detail-episode-info";
-    const title = document.createElement("b");
-    title.textContent = ep.title || code;
-    const meta = document.createElement("small");
-    meta.textContent = `${code} · ${ep.subtitleText ? "English subtitles" : "No subtitles"}`;
-    info.append(title, meta);
-    const editBtn = document.createElement("button");
-    editBtn.className = "btn ghost edit-episode-btn";
-    editBtn.type = "button";
-    editBtn.textContent = "Edit";
-    const watchBtn = document.createElement("button");
-    watchBtn.className = "btn primary watch-episode-btn";
-    watchBtn.type = "button";
-    watchBtn.textContent = ep.url ? "Watch" : "Add link";
-    row.append(info, editBtn, watchBtn);
-    editBtn.onclick = (e) => { e.stopPropagation(); openEpisodeEdit(series, ep); };
-    watchBtn.onclick = (e) => {
-      e.stopPropagation();
-      $("#libraryDetail").hidden = true;
-      if (ep.url) watchLibraryEpisode(series, ep);
-      else openLibraryForm(series.name);
-    };
-    list.appendChild(row);
+
+  const meta = [];
+  const rating = art?.rating ?? series.imdbRating;
+  if (rating != null) meta.push(`★ ${Number(rating).toFixed(1)}`);
+  if (art?.year || series.year) meta.push(String(art?.year || series.year));
+  if (art?.status) meta.push(art.status);
+  if (art?.runtimeText || art?.runtime) meta.push(art.runtimeText || fmtRuntime(art.runtime));
+  if (art?.voteCount) meta.push(`${Number(art.voteCount).toLocaleString()} votes`);
+  const oldInfo = body.querySelector(".detail-info-grid");
+  oldInfo?.remove();
+  if (meta.length) {
+    const chips = document.createElement("div"); chips.className = "detail-info-grid";
+    meta.forEach(x => { const c=document.createElement("span"); c.className="detail-info-chip"; c.textContent=x; chips.appendChild(c); });
+    body.insertBefore(chips, body.firstChild);
   }
+
+  if (isMovie) {
+    const ep = series.episodes?.[0];
+    if (ep) list.appendChild(renderDetailEpisode(series, ep, null, true));
+    $("#libraryDetail").hidden = false;
+    return;
+  }
+
+  const tabs = document.createElement("div"); tabs.className="detail-season-tabs";
+  const content = document.createElement("div"); content.id="detailSeasonContent";
+  list.append(tabs, content);
+  const seasons = seasonNumbers(series);
+  if (!seasons.length) {
+    content.innerHTML='<div class="inline-error">No season number has been assigned yet. Use Edit on an episode to set its season and episode number.</div>';
+    $("#libraryDetail").hidden = false;
+    return;
+  }
+  const renderSeason = async (season) => {
+    tabs.querySelectorAll(".detail-season-tab").forEach(b => b.classList.toggle("active", Number(b.dataset.season) === Number(season)));
+    content.innerHTML='<div class="inline-loading">Loading season details…</div>';
+    const tmdbSeason = await fetchTmdbSeason(series, season);
+    let local = localEpisodesForSeason(series, season);
+    if (Number(season) === 1 && local.length < (series.episodes || []).length) {
+      const explicit = (series.episodes || []).map(e => Number(e.seasonNumber)).filter(n => Number.isInteger(n) && n > 0);
+      if (new Set(explicit).size <= 1) local = [...local, ...(series.episodes || []).filter(e => e.seasonNumber == null)];
+    }
+    const remote = [...(tmdbSeason?.episodes || [])].sort((a,b)=>(a.episodeNumber||9999)-(b.episodeNumber||9999));
+    const merged=[];
+    const used=new Set();
+    for (const te of remote) {
+      const le=local.find(x=>!used.has(x.id) && Number(x.episodeNumber)===Number(te.episodeNumber));
+      if(le) used.add(le.id);
+      merged.push({local:le,tmdb:te});
+    }
+    for(const le of local) if(!used.has(le.id)) merged.push({local:le,tmdb:null});
+    merged.sort((a,b)=>Number(a.tmdb?.episodeNumber ?? a.local?.episodeNumber ?? 9999)-Number(b.tmdb?.episodeNumber ?? b.local?.episodeNumber ?? 9999));
+    content.innerHTML="";
+    const head=document.createElement("div"); head.className="inline-season-head";
+    const h=document.createElement("h4"); h.textContent=tmdbSeason?.name || `Season ${season}`;
+    const sp=document.createElement("span"); sp.textContent=[tmdbSeason?.episodeCount?`${tmdbSeason.episodeCount} episodes`:"",tmdbSeason?.rating!=null?`★ ${Number(tmdbSeason.rating).toFixed(1)}`:"",tmdbSeason?.voteCount?`${Number(tmdbSeason.voteCount).toLocaleString()} votes":""].filter(Boolean).join(" · ");
+    head.append(h,sp); content.appendChild(head);
+    const grid=document.createElement("div"); grid.className="detail-episodes"; content.appendChild(grid);
+    if(!merged.length){grid.innerHTML='<div class="inline-loading">No episodes found for this season.</div>';return;}
+    merged.forEach(x=>grid.appendChild(renderDetailEpisode(series,x.local,x.tmdb,false)));
+  };
+  seasons.forEach(season=>{
+    const info=(art?.seasons||[]).find(s=>Number(s.seasonNumber)===Number(season));
+    const b=document.createElement("button"); b.type="button"; b.className="detail-season-tab"; b.dataset.season=season;
+    b.innerHTML=`Season ${season}<small>${info?.episodeCount || localEpisodesForSeason(series,season).length || 0} eps${info?.rating!=null?` · ★ ${Number(info.rating).toFixed(1)}`:""}</small>`;
+    b.onclick=()=>renderSeason(season); tabs.appendChild(b);
+  });
   $("#libraryDetail").hidden = false;
+  await renderSeason(seasons[0]);
+}
+
+function renderDetailEpisode(series, ep, tmdbEp, movie=false) {
+  const row=document.createElement("div"); row.className="detail-episode";
+  const artUrl=tmdbEp?.stillUrl || (tmdbEp?.stillPath ? `${TMDB_IMG}w300${tmdbEp.stillPath}` : "");
+  const art=document.createElement("div"); art.className="detail-episode-art"; if(artUrl) art.style.backgroundImage=`url("${artUrl}")`;
+  const copy=document.createElement("div"); copy.className="detail-episode-copy";
+  const n=movie?"Movie":`S${String(tmdbEp?.seasonNumber ?? ep?.seasonNumber ?? 1).padStart(2,"0")}E${String(tmdbEp?.episodeNumber ?? ep?.episodeNumber ?? 1).padStart(2,"0")}`;
+  const title=tmdbEp?.name || ep?.title || n;
+  const b=document.createElement("b"); b.textContent=title;
+  const rating=tmdbEp?.rating!=null?`★ ${Number(tmdbEp.rating).toFixed(1)}`:"";
+  const date=tmdbEp?.airDate?new Date(tmdbEp.airDate+"T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}):"";
+  const meta=document.createElement("small"); meta.textContent=[n,rating,date,ep?.subtitleText?"English subtitles":""].filter(Boolean).join(" · ");
+  copy.append(b,meta);
+  const ov=document.createElement("div"); ov.className="detail-episode-overview"; ov.textContent=tmdbEp?.overview || ep?.episodeSummary || ""; copy.appendChild(ov);
+  const actions=document.createElement("div"); actions.className="detail-episode-actions";
+  const edit=document.createElement("button"); edit.className="btn ghost"; edit.type="button"; edit.textContent="Edit"; edit.disabled=!ep; edit.onclick=e=>{e.stopPropagation(); if(ep) openEpisodeEdit(series,ep);};
+  const watch=document.createElement("button"); watch.className="btn primary"; watch.type="button"; watch.textContent=ep?.url?"▶ Watch":"Add link"; watch.onclick=e=>{e.stopPropagation(); $("#libraryDetail").hidden=true; ep?.url?watchLibraryEpisode(series,ep):openLibraryForm(series.name);};
+  actions.append(watch,edit); copy.appendChild(actions); row.append(art,copy); return row;
 }
 
 function renderNetflixCard(series) {
@@ -1407,7 +1470,7 @@ function renderNetflixCard(series) {
   info.className = "netflix-card-info";
   info.innerHTML = `<b>${esc(series.name || "Untitled")}</b><span>${esc(meta || type)}</span>`;
   card.append(shade, info);
-  const open = () => mediaTypeOf(series) === "movie" ? openLibraryDetail(series) : openInlineSeries(series);
+  const open = () => openLibraryDetail(series);
   card.addEventListener("click", (e) => {
     if (card.dataset.dragMoved === "1") { card.dataset.dragMoved = "0"; return; }
     open();
@@ -1510,7 +1573,7 @@ function renderLanding() {
     activeLibraryTitle = activeLibraryTitle && MY_LIBRARY.some((x) => x.id === activeLibraryTitle.id) ? activeLibraryTitle : hero;
     const h = activeLibraryTitle;
     const art = tmdbArt(h);
-    const back = backdropUrl(art);
+    const back = backdropUrl(art) || posterUrl(art, "w1280");
     heroTitle.textContent = h.name || "Your library";
     heroSummary.textContent = h.summary || art?.overview || "Pick a title and watch together.";
     heroMeta.innerHTML = titleMeta(h).map((m, i) => `<span${m.startsWith("★") ? ' class="rating"' : ""}>${esc(m)}</span>`).join("");
@@ -1521,6 +1584,9 @@ function renderLanding() {
       if (ep) watchLibraryEpisode(h, ep); else openLibraryDetail(h);
     };
     $("#libraryHeroInfo").onclick = () => openLibraryDetail(h);
+    if (!art) {
+      fetchTmdbArt(h).then((fresh) => { if (fresh) renderLanding(); });
+    }
   } else {
     activeLibraryTitle = null;
     heroTitle.textContent = "Your library";
@@ -1642,8 +1708,8 @@ function openLibraryForm(seriesName) {
   const chosenSeries = seriesName ? findSeries(seriesName) : null;
   const imdbField = $("#libraryForm").querySelector('[name="imdbId"]');
   if (imdbField) { imdbField.value = chosenSeries?.imdbId || ""; }
-  const movieBox = $("#libraryIsMovie");
-  if (movieBox) movieBox.checked = chosenSeries ? mediaTypeOf(chosenSeries) === "movie" : false;
+  const mediaType = $("#libraryMediaType");
+  if (mediaType) { mediaType.value = chosenSeries ? (mediaTypeOf(chosenSeries) === "movie" ? "movie" : "series") : "series"; mediaType.disabled = !!chosenSeries; }
   syncMovieFields();
   const target = chosenSeries
     ? $("#libraryForm").querySelector('[name="url"]')
@@ -1836,7 +1902,7 @@ document.addEventListener("click", (e) => {
   if (card && !card.dataset.dragMoved) {
     const id = card.dataset.libraryId;
     const item = MY_LIBRARY.find(x => String(x.id) === String(id));
-    if (item) { e.preventDefault(); e.stopPropagation(); mediaTypeOf(item) === "movie" ? openLibraryDetail(item) : openInlineSeries(item); }
+    if (item) { e.preventDefault(); e.stopPropagation(); openLibraryDetail(item); }
   }
 }, true);
 
@@ -1848,7 +1914,7 @@ $("#librarySeriesSelect").onchange = syncSeriesFields;
  * S01E01 episode (which also sent movie subtitle lookups down the TV
  * season/episode search path — see autoImportEpisodeSubtitle). */
 function syncMovieFields() {
-  const isMovie = $("#libraryIsMovie")?.checked;
+  const isMovie = $("#libraryMediaType")?.value === "movie";
   const form = $("#libraryForm");
   if (form) {
     const seriesLabel = form.querySelector('[name="series"]')?.closest(".field")?.querySelector(".eyebrow");
@@ -1874,7 +1940,7 @@ function syncMovieFields() {
       : "Since you already entered the season and episode number, Parallel pulls the best matching English subtitle for that exact episode straight from OpenSubtitles — no separate lookup step. If none is found, you'll be asked whether to upload a file by hand instead.";
   }
 }
-$("#libraryIsMovie")?.addEventListener("change", syncMovieFields);
+$("#libraryMediaType")?.addEventListener("change", syncMovieFields);
 syncMovieFields();
 $("#landingJoinBtn").onclick = () => showGate();
 $("#homeBtn").onclick = () => {
@@ -1904,6 +1970,7 @@ $("#libraryCancel").onclick = () => {
   $("#libraryFormOverlay").hidden = true;
   $("#libraryFormWrap").hidden = true;
   $("#libraryForm").reset();
+  const mt = $("#libraryMediaType"); if (mt) { mt.disabled = false; mt.value = "series"; }
   syncMovieFields();
   populateSeriesSelect();
 };
