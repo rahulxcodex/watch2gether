@@ -1334,13 +1334,16 @@ function setBackgroundWithFallback(el, url, fallbackLabel = "") {
   probe.src = url;
 }
 function titleMeta(series) {
-  const art = tmdbArt(series);
+  const art = tmdbArt(series) || {};
   const type = mediaTypeOf(series) === "movie" ? "Movie" : "Series";
-  const count = series.episodes?.length || 0;
-  const rating = art?.rating ?? series.imdbRating;
-  return [type, series.year || art?.year || "", rating ? `★ ${Number(rating).toFixed(1)}` : "", type === "Series" ? `${count} episode${count === 1 ? "" : "s"}` : ""]
-    .filter(Boolean)
-    .map((x) => String(x));
+  const count = Number.isFinite(Number(series?.episodes?.length)) ? Number(series.episodes.length) : 0;
+  const rawYear = series?.year ?? art?.year ?? "";
+  const rawRating = art?.rating ?? series?.imdbRating ?? "";
+  const year = rawYear === null || rawYear === undefined ? "" : String(rawYear);
+  const ratingNumber = Number(rawRating);
+  const rating = Number.isFinite(ratingNumber) && ratingNumber > 0 ? `★ ${ratingNumber.toFixed(1)}` : "";
+  const episodeText = type === "Series" ? `${count} episode${count === 1 ? "" : "s"}` : "";
+  return [type, year, rating, episodeText].filter(Boolean).map((x) => String(x));
 }
 
 async function openLibraryDetail(series) {
@@ -1621,7 +1624,10 @@ function renderLanding() {
     }
     heroTitle.textContent = h.name || "Your library";
     heroSummary.textContent = h.summary || art?.overview || "Pick a title and watch together.";
-    heroMeta.innerHTML = titleMeta(h).map((m) => `<span${String(m).startsWith("★") ? ' class="rating"' : ""}>${esc(m)}</span>`).join("");
+    heroMeta.innerHTML = titleMeta(h).map((m) => {
+      const text = String(m ?? "");
+      return `<span${text.startsWith("★") ? ' class="rating"' : ""}>${esc(text)}</span>`;
+    }).join("");
     setBackgroundWithFallback(heroBackdrop, back);
     const heroWatch = $("#libraryHeroWatch");
     const playableHeroEpisode = Array.isArray(h.episodes) ? h.episodes.find((e) => String(e?.url || "").trim()) : null;
