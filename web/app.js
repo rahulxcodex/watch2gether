@@ -107,6 +107,63 @@ const ic = (n) => `<svg viewBox="0 0 24 24">${ICON[n]}</svg>`;
  * ======================================================================== */
 
 const LIBRARY_KEY = "wtLibraryV1";
+
+/* Media-type helpers.
+ * Older library entries did not have an explicit media type and represented
+ * movies as an "episode" with no season/episode numbers. Keep those entries
+ * compatible while treating movies as first-class media everywhere in the UI.
+ */
+function mediaTypeOf(series, item = null) {
+  if (item?.mediaType === "movie" || series?.mediaType === "movie") return "movie";
+  if (item?.mediaType === "series" || series?.mediaType === "series") return "series";
+  if (item && (item.episodeCode === "Movie" || (item.seasonNumber == null && item.episodeNumber == null))) return "movie";
+  return "series";
+}
+
+function isMovieItem(series, item) {
+  return mediaTypeOf(series, item) === "movie";
+}
+
+function normalizeLibraryMediaTypes() {
+  let changed = false;
+  for (const series of MY_LIBRARY) {
+    const inferredMovie = series.mediaType === "movie" ||
+      (Array.isArray(series.episodes) && series.episodes.length &&
+       series.episodes.every((e) => e.mediaType === "movie" || e.episodeCode === "Movie" ||
+         (e.seasonNumber == null && e.episodeNumber == null)));
+    const nextSeriesType = inferredMovie ? "movie" : "series";
+    if (series.mediaType !== nextSeriesType) {
+      series.mediaType = nextSeriesType;
+      changed = true;
+    }
+    if (!Array.isArray(series.episodes)) {
+      series.episodes = [];
+      changed = true;
+    }
+    for (const item of series.episodes) {
+      const nextItemType = item.mediaType === "movie" || nextSeriesType === "movie" ||
+        item.episodeCode === "Movie" ||
+        (item.seasonNumber == null && item.episodeNumber == null) ? "movie" : "episode";
+      if (item.mediaType !== nextItemType) {
+        item.mediaType = nextItemType;
+        changed = true;
+      }
+      if (nextItemType === "movie") {
+        if (item.seasonNumber != null || item.episodeNumber != null) {
+          item.seasonNumber = null;
+          item.episodeNumber = null;
+          changed = true;
+        }
+        if (item.episodeCode !== "Movie") {
+          item.episodeCode = "Movie";
+          changed = true;
+        }
+      }
+    }
+  }
+  if (changed) writeLibrary();
+}
+
 const ROOMS_KEY = "wtRoomsV1";
 
 const readStore = (key, fallback) => {
@@ -285,17 +342,18 @@ async function addLibraryEpisode(form) {
   const subtitleUrl = String(fd.get("subtitleUrl") || "").trim();
   const subtitleFile = fd.get("subtitleFile");
 
-  if (!seriesName) return say("Enter a series name.");
+  if (!seriesName) return say(isMovie ? "Enter a movie name." : "Enter a series name.");
   if (!/^tt\d{7,10}$/i.test(imdbId)) return say("Enter a valid IMDb ID such as tt1234567.");
   if (!isMovie && (season == null || season < 1)) return say("Enter a valid season number.");
   if (!isMovie && (epNo == null || epNo < 1)) return say("Enter a valid episode number.");
-  if (!url || !/^https?:\/\//i.test(url)) return say("Enter a valid http(s) episode URL.");
+  if (!url || !/^https?:\/\//i.test(url)) return say(`Enter a valid http(s) ${isMovie ? "movie" : "episode"} URL.`);
   if (!parseSource(url)) return say("That doesn't look like a playable video or HLS URL.");
   if (subtitleUrl && !/^https?:\/\//i.test(subtitleUrl)) return say("Subtitle URL must start with http:// or https://.");
   if (subtitleUrl && subtitleFile?.size) return say("Use either a subtitle URL or an uploaded subtitle file, not both.");
   if (subtitleFile?.size > 1500000) return say("Subtitle file is larger than 1.5 MB.");
 
   const generatedCode = isMovie ? "Movie" : `S${String(season).padStart(2, "0")}E${String(epNo).padStart(2, "0")}`;
+  const itemMediaType = isMovie ? "movie" : "episode";
 
   const submit = form.querySelector('button[type="submit"]');
   const oldText = submit?.textContent;
@@ -384,7 +442,7 @@ async function addLibraryEpisode(form) {
       meta = body;
     } catch (e) {
       meta = {
-        series: seriesName, seasonNumber: season, episodeNumber: epNo, episodeCode: generatedCode,
+        series: seriesName, mediaType: isMovie ? "movie" : "series", seasonNumber: season, episodeNumber: epNo, episodeCode: generatedCode,
         episodeTitle: "", confidence: "low", seriesYear: null, seriesImdbId: null,
         seriesImdbUrl: null, seriesImdbRating: null, seriesGenres: [], seriesSummary: "",
         episodeImdbId: null, episodeImdbUrl: null, episodeImdbRating: null,
@@ -399,12 +457,12 @@ async function addLibraryEpisode(form) {
     // episode this is, so identify's guess never overrides it.
     const title = episodeOverride ||
       [generatedCode, String(meta.episodeTitle || "").trim()].filter(Boolean).join(" · ") ||
-      `Episode ${((findSeries(resolvedSeries)?.episodes.length || 0) + 1)}`;
+      isMovie ? (String(meta.title || meta.seriesTitle || resolvedSeries).trim() || resolvedSeries) : `Episode ${((findSeries(resolvedSeries)?.episodes.length || 0) + 1)}`;
 
     let series = MY_LIBRARY.find((x) => x.imdbId && x.imdbId.toLowerCase() === imdbId) || findSeries(resolvedSeries);
     if (!series) {
       series = {
-        id: makeId("series"), name: resolvedSeries.slice(0, 120), episodes: [],
+        id: makeId("series"), name: resolvedSeries.slice(0, 120), mediaType: isMovie ? "movie" : "series", episodes: [],
         year: Number.isInteger(meta.seriesYear) ? meta.seriesYear : null,
         imdbId, imdbUrl: meta.seriesImdbUrl || `https://www.imdb.com/title/${imdbId}/`,
         imdbRating: typeof meta.seriesImdbRating === "number" ? meta.seriesImdbRating : null,
@@ -415,6 +473,7 @@ async function addLibraryEpisode(form) {
     } else {
       Object.assign(series, {
         year: Number.isInteger(meta.seriesYear) ? meta.seriesYear : (series.year ?? null),
+        mediaType: isMovie ? "movie" : (series.mediaType || "series"),
         imdbId: series.imdbId || imdbId,
         imdbUrl: meta.seriesImdbUrl || series.imdbUrl || `https://www.imdb.com/title/${imdbId}/`,
         imdbRating: typeof meta.seriesImdbRating === "number" ? meta.seriesImdbRating : (series.imdbRating ?? null),
@@ -423,10 +482,18 @@ async function addLibraryEpisode(form) {
       });
     }
 
+    const existingSeriesType = series.mediaType === "movie" ? "movie" : "series";
+    if (series.episodes.length && existingSeriesType !== (isMovie ? "movie" : "series")) {
+      return say(`"${series.name}" is already saved as a ${existingSeriesType}. Create a separate ${isMovie ? "movie" : "series"} entry instead.`);
+    }
+
     const duplicate = series.episodes.find((e) => e.url === url) ||
-      series.episodes.find((e) => !e.url && e.seasonNumber === season && e.episodeNumber === epNo);
+      (isMovie
+        ? series.episodes.find((e) => mediaTypeOf(series, e) === "movie")
+        : series.episodes.find((e) => !e.url && e.seasonNumber === season && e.episodeNumber === epNo));
     const episodePatch = {
       url,
+      mediaType: itemMediaType,
       title, seasonNumber: season, episodeNumber: epNo, episodeCode: generatedCode,
       seriesImdbId: imdbId,
       episodeImdbId: meta.episodeImdbId || null, episodeImdbUrl: meta.episodeImdbUrl || null,
@@ -445,13 +512,16 @@ async function addLibraryEpisode(form) {
     if (duplicate) {
       Object.assign(duplicate, episodePatch);
       writeLibrary();
-      say(`${series.name} — updated existing episode`);
+      say(`${series.name} — updated existing ${isMovie ? "movie" : "episode"}`);
       return;
     }
 
     const ep = { id: makeId("ep"), ...episodePatch, addedAt: Date.now() };
     series.episodes.push(ep);
     series.episodes.sort((a, b) => {
+      const am = mediaTypeOf(series, a) === "movie";
+      const bm = mediaTypeOf(series, b) === "movie";
+      if (am !== bm) return am ? -1 : 1;
       const sa = Number.isInteger(a.seasonNumber) ? a.seasonNumber : 9999;
       const sb = Number.isInteger(b.seasonNumber) ? b.seasonNumber : 9999;
       const ea = Number.isInteger(a.episodeNumber) ? a.episodeNumber : 9999;
@@ -466,7 +536,7 @@ async function addLibraryEpisode(form) {
     const subMsg = subtitleSource === "OpenSubtitles (auto)"
       ? "English subtitles auto-downloaded from OpenSubtitles"
       : subtitleText ? "English subtitles saved" : "";
-    say(subMsg ? `${series.name} — ${ep.title} · ${subMsg}` : `${series.name} — ${ep.title} · added`);
+    say(subMsg ? `${series.name} — ${ep.title} · ${subMsg}` : `${series.name} — ${ep.title} · ${isMovie ? "movie added" : "episode added"}`);
   } finally {
     if (submit) { submit.disabled = false; submit.textContent = oldText || "Analyze & add"; }
   }
@@ -615,7 +685,7 @@ async function importOpenSubtitles(form) {
     let series = MY_LIBRARY.find((x) => x.imdbId && x.imdbId.toLowerCase() === imdbId) || findSeries(resolvedSeries);
     if (!series) {
       series = {
-        id: makeId("series"), name: resolvedSeries.slice(0, 120), episodes: [],
+        id: makeId("series"), name: resolvedSeries.slice(0, 120), mediaType: isMovie ? "movie" : "series", episodes: [],
         year: Number.isInteger(meta?.seriesYear) ? meta.seriesYear : null,
         imdbId, imdbUrl: meta?.seriesImdbUrl || `https://www.imdb.com/title/${imdbId}/`,
         imdbRating: typeof meta?.seriesImdbRating === "number" ? meta.seriesImdbRating : null,
@@ -709,7 +779,7 @@ function renderLanding() {
   if (!MY_LIBRARY.length) {
     lib.innerHTML = `<div class="landing-empty">
       <b>Your library is empty.</b>
-      <span>Add a series, paste an episode link, and optionally paste or upload its English subtitle file.</span>
+      <span>Add a movie or series, paste its video link, and optionally save an English subtitle.</span>
     </div>`;
   } else {
     for (const series of MY_LIBRARY) {
@@ -727,13 +797,15 @@ function renderLanding() {
           <div>
             <h3>${esc(series.name)}${series.year ? ` <span class="library-year">(${esc(series.year)})</span>` : ""}</h3>
             <div class="library-series-meta">
-              <span>${series.episodes.length} episode${series.episodes.length === 1 ? "" : "s"}</span>
+              <span>${mediaTypeOf(series) === "movie"
+              ? "Movie"
+              : `${series.episodes.length} episode${series.episodes.length === 1 ? "" : "s"}`}</span>
               ${imdb}${genres}
             </div>
             ${series.summary ? `<p class="library-summary">${esc(series.summary)}</p>` : ""}
           </div>
           <div class="library-series-actions">
-            <button class="library-add-episode" type="button">+ Add episode</button>
+            <button class="library-add-episode" type="button">${mediaTypeOf(series) === "movie" ? "+ Edit movie" : "+ Add episode"}</button>
             <button class="library-delete-series" type="button">Delete series</button>
           </div>
         </div>
@@ -744,6 +816,7 @@ function renderLanding() {
       const list = card.querySelector(".library-episodes");
 
       for (const ep of series.episodes) {
+        const itemMovie = isMovieItem(series, ep);
         const subtitleLabel = ep.subtitleText
           ? `English subtitles saved · ${esc(ep.subtitleFileName || "subtitle")}`
           : "No subtitle saved";
@@ -757,7 +830,7 @@ function renderLanding() {
         row.innerHTML = `
           <div class="episode-meta">
             <b>${esc(ep.title)}</b>
-            <span>${subtitleLabel}${epImdb ? ` · ${epImdb}` : ""}</span>
+            <span>${itemMovie ? "Movie" : subtitleLabel}${itemMovie && ep.subtitleText ? ` · ${subtitleLabel}` : ""}${epImdb ? ` · ${epImdb}` : ""}</span>
             ${ep.episodeSummary ? `<p class="episode-summary">${esc(ep.episodeSummary)}</p>` : ""}
           </div>
           <div class="episode-actions">
@@ -894,6 +967,9 @@ function openLibraryForm(seriesName) {
   const chosenSeries = seriesName ? findSeries(seriesName) : null;
   const imdbField = $("#libraryForm").querySelector('[name="imdbId"]');
   if (imdbField) { imdbField.value = chosenSeries?.imdbId || ""; }
+  const movieBox = $("#libraryIsMovie");
+  if (movieBox) movieBox.checked = chosenSeries ? mediaTypeOf(chosenSeries) === "movie" : false;
+  syncMovieFields();
   const target = chosenSeries
     ? $("#libraryForm").querySelector('[name="url"]')
     : $("#librarySeries");
@@ -1059,6 +1135,15 @@ $("#librarySeriesSelect").onchange = syncSeriesFields;
  * season/episode search path — see autoImportEpisodeSubtitle). */
 function syncMovieFields() {
   const isMovie = $("#libraryIsMovie")?.checked;
+  const form = $("#libraryForm");
+  if (form) {
+    const seriesLabel = form.querySelector('[name="series"]')?.closest(".field")?.querySelector(".eyebrow");
+    const titleLabel = form.querySelector('[name="episode"]')?.closest(".field")?.querySelector(".eyebrow");
+    const urlLabel = form.querySelector('[name="url"]')?.closest(".field")?.querySelector(".eyebrow");
+    if (seriesLabel) seriesLabel.firstChild.textContent = isMovie ? "Movie name" : "Series name";
+    if (titleLabel) titleLabel.firstChild.textContent = isMovie ? "Movie title " : "Episode title ";
+    if (urlLabel) urlLabel.firstChild.textContent = isMovie ? "Movie link" : "Episode link";
+  }
   const seasonField = $("#seasonField");
   const episodeField = $("#episodeField");
   const seasonInput = seasonField?.querySelector("input");
@@ -2737,7 +2822,7 @@ function paintMic() {
 
 function syncPeers() {
   const want = new Set(
-    VOICE.on ? R.members.filter((m) => m.voice && m.uid !== R.uid).map((m) => m.uid) : []
+    VOICE.on ? R.members.filter((m) => m.uid !== R.uid).map((m) => m.uid) : []
   );
   for (const uid of [...VOICE.peers.keys()]) if (!want.has(uid)) dropPeer(uid);
   for (const uid of want) ensurePeer(uid, true);
@@ -2751,7 +2836,7 @@ function ensurePeer(uid, mayOffer) {
   const el = document.createElement("audio");
   el.autoplay = true;
   $("#voices").appendChild(el);
-  p = { pc, el, read: null, level: 0 };
+  p = { pc, el, read: null, level: 0, pendingIce: [] };
   VOICE.peers.set(uid, p);
 
   if (VOICE.stream) for (const t of VOICE.stream.getTracks()) pc.addTrack(t, VOICE.stream);
@@ -2790,14 +2875,23 @@ async function onSignal(from, d) {
   try {
     if (d.sdp) {
       await p.pc.setRemoteDescription(d.sdp);
+      if (p.pendingIce.length) {
+        for (const candidate of p.pendingIce.splice(0)) {
+          try { await p.pc.addIceCandidate(candidate); } catch {}
+        }
+      }
       if (d.sdp.type === "offer") {
         await p.pc.setLocalDescription(await p.pc.createAnswer());
         signal(from, { sdp: p.pc.localDescription.toJSON() });
       }
-    } else if (d.ice) {
-      await p.pc.addIceCandidate(d.ice);
+     } else if (d.ice) {
+      if (p.pc.remoteDescription) {
+        await p.pc.addIceCandidate(d.ice);
+      } else {
+        p.pendingIce.push(d.ice);
+      }
     }
-  } catch { /* candidates can land before the description; harmless */ }
+  } catch { /* a stale/invalid candidate should not kill the peer */ }
 }
 
 function dropPeer(uid) {
