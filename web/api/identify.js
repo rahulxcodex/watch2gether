@@ -1,94 +1,182 @@
 /**
- * Anime library metadata via Gemini (free tier, single provider).
+ * Minimal metadata resolver with provider fallback.
  *
  * POST /api/identify
- * Body: { series: string, url: string }
+ * Body: { series?: string, url?: string, imdbId?: string }
  *
- * Step 1 (research/web search): gemini-3.1-flash-lite with the built-in
- *   google_search grounding tool.
- * Step 2 (structured JSON):      gemini-3.1-flash-lite again, this time
- *   with a responseSchema so the reply is constrained JSON instead of
- *   free text.
+ * Provider order (default): Gemini -> Grok -> OpenRouter.
+ * Configure with LLM_PROVIDER_ORDER=gemini,grok,openrouter.
  *
- * gemini-2.5-flash was dropped in favor of the `gemini-flash-latest` alias:
- * Google has been retiring dated Flash model IDs (gemini-2.5-flash,
- * gemini-3.1-flash-lite, etc.) faster than expected, sometimes returning
- * 404s for a model ID before its documented shutdown date, or before it's
- * fully rolled out to every account/region. `gemini-flash-latest` is an
- * alias Google keeps pointed at whatever the current stable Flash model
- * is, so this stops needing a code change every time Google reshuffles
- * model names. If it ever needs to be pinned to a specific dated model
- * instead, check https://ai.google.dev/gemini-api/docs/models for the
- * current free-tier, non-deprecated list.
- *
- * Gemini's free tier (Google AI Studio, no credit card) covers both steps
- * with generous request/day and RPM limits, and Google Search grounding has
- * its own separate free monthly allowance, so there's no need to split
- * load across two different providers the way the Groq/OpenRouter version
- * did. Subtitle files are supplied by the user through the library UI and
- * are never searched for by the model.
+ * Design goal: keep LLM input/output tiny. We fetch the supplied public IMDb
+ * page ourselves when an IMDb ID is available, extract only compact JSON-LD
+ * facts, and ask the LLM only for fields that cannot be determined locally.
+ * No web-search tool and no two-pass research/formatting pipeline are used.
  */
 export const config = { runtime: "nodejs" };
 
-const MODEL = "gemini-flash-latest";
 const MAX_URL_LENGTH = 4096;
+const MAX_INPUT = 220;
+const MAX_OUTPUT_TOKENS = 450;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+const GROK_MODEL = process.env.GROK_MODEL || "grok-4.5";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "openrouter/auto";
 
 function badUrl(value) {
   if (!value || typeof value !== "string" || value.length > MAX_URL_LENGTH) return true;
   if (!/^https?:\/\//i.test(value)) return true;
   try {
     const h = new URL(value).hostname.toLowerCase();
-    return (
-      /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)$/i.test(h) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(h)
-    );
-  } catch {
-    return true;
-  }
+    return /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)$/i.test(h) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+  } catch { return true; }
 }
 
-// Gemini's response shape: candidates[0].content.parts[] with text chunks.
-function extractText(response) {
-  const parts = response?.candidates?.[0]?.content?.parts || [];
-  return parts.map((p) => p.text || "").join("").trim();
+function extractGeminiText(response) {
+  return (response?.candidates?.[0]?.content?.parts || [])
+    .map(p => p.text || "").join("").trim();
 }
 
-// Gemini reports 429s with a retryDelay (e.g. "12s") inside
-// error.details[], not a "try again in Xs" sentence like Groq. Handle both
-// shapes so this keeps working if the pipeline ever mixes providers again.
-function parseRetryAfterSeconds(raw) {
-  let sec = null;
+function extractChatText(response) {
+  return String(response?.choices?.[0]?.message?.content || "").trim();
+}
+
+function retrySeconds(raw) {
   try {
-    const parsed = JSON.parse(raw);
-    const detail = parsed?.error?.details?.find((d) => d.retryDelay);
-    if (detail) sec = parseFloat(detail.retryDelay);
+    const j = JSON.parse(raw);
+    const d = j?.error?.details?.find?.(x => x.retryDelay);
+    if (d?.retryDelay) return Math.min(Math.ceil(parseFloat(d.retryDelay) * 1.2) + 1, 12);
   } catch {}
-  if (sec == null) {
-    const m = /try again in ([\d.]+)s/i.exec(raw || "");
-    if (m) sec = parseFloat(m[1]);
-  }
-  if (sec == null) return 5;
-  // Small buffer so a retry doesn't land right at the reset instant.
-  return Math.min(Math.ceil(sec * 1.3) + 1, 18);
+  const m = /(?:try again in|retry-after)[^\d]*([\d.]+)s?/i.exec(raw || "");
+  return m ? Math.min(Math.ceil(Number(m[1])) + 1, 12) : 3;
 }
 
-// Free-tier endpoints can burst past their per-minute request/token caps.
-// That's transient, not exhaustion, so retry with the wait time the
-// provider reports before giving up. attempts=4 with an 18s cap keeps
-// worst case under the 60s maxDuration set for this function in vercel.json.
-async function fetchWithRetry(base, headers, body, attempts = 4) {
-  let lastRaw = "", lastStatus = 0;
+async function postJSON(url, headers, body, attempts = 2) {
+  let last = { status: 0, raw: "" };
   for (let i = 0; i < attempts; i++) {
-    const r = await fetch(base, { method: "POST", headers, body: JSON.stringify(body) });
+    const r = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
     const raw = await r.text();
-    if (r.ok) return { ok: true, raw };
-    lastRaw = raw;
-    lastStatus = r.status;
-    if (r.status !== 429 || i === attempts - 1) break;
-    const waitSec = parseRetryAfterSeconds(raw);
-    await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
+    if (r.ok) return { ok: true, status: r.status, raw };
+    last = { status: r.status, raw };
+    if (![408, 429, 500, 502, 503, 504].includes(r.status) || i === attempts - 1) break;
+    await new Promise(ok => setTimeout(ok, retrySeconds(raw) * 1000));
   }
-  return { ok: false, raw: lastRaw, status: lastStatus };
+  return { ok: false, ...last };
+}
+
+function parseJsonLoose(text) {
+  if (!text) throw new Error("empty response");
+  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  try { return JSON.parse(cleaned); } catch {}
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+  throw new Error("provider returned non-JSON metadata");
+}
+
+function normalize(data, imdbId, fallbackSeries) {
+  const out = {
+    series: String(data?.series || fallbackSeries || "").trim().slice(0, 120),
+    seasonNumber: Number.isInteger(data?.seasonNumber) ? data.seasonNumber : null,
+    episodeNumber: Number.isInteger(data?.episodeNumber) ? data.episodeNumber : null,
+    episodeCode: String(data?.episodeCode || "").slice(0, 20),
+    episodeTitle: String(data?.episodeTitle || "").slice(0, 160),
+    confidence: ["high", "medium", "low"].includes(data?.confidence) ? data.confidence : "low",
+    seriesYear: Number.isInteger(data?.seriesYear) ? data.seriesYear : null,
+    seriesImdbId: String(data?.seriesImdbId || imdbId || "").match(/^tt\d{7,10}$/i)?.[0] || null,
+    seriesImdbUrl: null,
+    seriesImdbRating: typeof data?.seriesImdbRating === "number" ? data.seriesImdbRating : null,
+    seriesGenres: Array.isArray(data?.seriesGenres) ? data.seriesGenres.slice(0, 6).map(String) : [],
+    seriesSummary: String(data?.seriesSummary || "").slice(0, 500),
+    episodeImdbId: String(data?.episodeImdbId || "").match(/^tt\d{7,10}$/i)?.[0] || null,
+    episodeImdbUrl: null,
+    episodeImdbRating: typeof data?.episodeImdbRating === "number" ? data.episodeImdbRating : null,
+    episodeSummary: String(data?.episodeSummary || "").slice(0, 500),
+    metadataNotes: String(data?.metadataNotes || "").slice(0, 500),
+  };
+  if (out.seriesImdbId) out.seriesImdbUrl = `https://www.imdb.com/title/${out.seriesImdbId}/`;
+  if (out.episodeImdbId) out.episodeImdbUrl = `https://www.imdb.com/title/${out.episodeImdbId}/`;
+  if (!out.episodeCode && out.seasonNumber != null && out.episodeNumber != null) {
+    out.episodeCode = `S${String(out.seasonNumber).padStart(2, "0")}E${String(out.episodeNumber).padStart(2, "0")}`;
+  }
+  return out;
+}
+
+async function fetchCompactImdb(imdbId) {
+  if (!imdbId) return {};
+  try {
+    const r = await fetch(`https://www.imdb.com/title/${imdbId}/`, {
+      headers: { "user-agent": "Mozilla/5.0", accept: "text/html,application/xhtml+xml" },
+      redirect: "follow",
+    });
+    if (!r.ok) return {};
+    const html = (await r.text()).slice(0, 500000);
+    const scripts = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+    for (const m of scripts) {
+      try {
+        const j = JSON.parse(m[1]);
+        const x = Array.isArray(j) ? j.find(v => v?.['@type']) : j;
+        if (!x) continue;
+        return {
+          name: x.name || "",
+          year: Number(String(x.datePublished || "").slice(0, 4)) || null,
+          rating: Number(x?.aggregateRating?.ratingValue) || null,
+          genres: Array.isArray(x.genre) ? x.genre.slice(0, 6) : (x.genre ? [x.genre] : []),
+          description: String(x.description || "").slice(0, 500),
+          type: x['@type'] || "",
+        };
+      } catch {}
+    }
+  } catch {}
+  return {};
+}
+
+function buildPrompt({ series, url, imdbId, imdb, playlistHint }) {
+  return `Return ONLY compact JSON. Identify one anime/movie/episode.
+Required keys: series,seasonNumber,episodeNumber,episodeCode,episodeTitle,confidence,seriesYear,seriesSummary,episodeSummary,metadataNotes.
+Use null for unknown numbers. Never invent data. Keep summaries <=180 chars. Do not search for subtitles.
+User series: ${series || ""}
+IMDb: ${imdbId || ""}
+Stream URL: ${url || ""}
+IMDb facts: ${JSON.stringify(imdb).slice(0, 1400)}
+Playlist hint: ${playlistHint.slice(0, 500)}
+If IMDb facts already identify the title, trust them. Extract SxxEyy from the URL/hint when present.`;
+}
+
+async function callGemini(key, prompt) {
+  const schema = {
+    type: "object",
+    properties: {
+      series:{type:"string"},seasonNumber:{type:"integer",nullable:true},episodeNumber:{type:"integer",nullable:true},
+      episodeCode:{type:"string"},episodeTitle:{type:"string"},confidence:{type:"string",enum:["high","medium","low"]},
+      seriesYear:{type:"integer",nullable:true},seriesSummary:{type:"string"},episodeSummary:{type:"string"},metadataNotes:{type:"string"}
+    },
+    required:["series","seasonNumber","episodeNumber","episodeCode","episodeTitle","confidence","seriesYear","seriesSummary","episodeSummary","metadataNotes"]
+  };
+  const r = await postJSON(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(key)}`,
+    {"content-type":"application/json"},
+    {contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{responseMimeType:"application/json",responseSchema:schema,maxOutputTokens:MAX_OUTPUT_TOKENS,temperature:0}}
+  );
+  if (!r.ok) throw new Error(`Gemini HTTP ${r.status}`);
+  return parseJsonLoose(extractGeminiText(JSON.parse(r.raw)));
+}
+
+async function callOpenAICompatible(base, key, model, prompt, extraHeaders = {}) {
+  const r = await postJSON(`${base}/chat/completions`, {
+    "content-type":"application/json", authorization:`Bearer ${key}`, ...extraHeaders
+  }, {
+    model,
+    messages:[
+      {role:"system",content:"You are a metadata extractor. Output only JSON, no markdown. Be concise and never invent facts."},
+      {role:"user",content:prompt}
+    ],
+    temperature:0,
+    max_tokens:MAX_OUTPUT_TOKENS,
+    stream:false,
+    ...(base.includes("x.ai") ? {reasoning_effort:"low"} : {})
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return parseJsonLoose(extractChatText(JSON.parse(r.raw)));
 }
 
 export default async function handler(req, res) {
@@ -96,178 +184,61 @@ export default async function handler(req, res) {
   res.setHeader("access-control-allow-methods", "POST,OPTIONS");
   res.setHeader("access-control-allow-headers", "Content-Type");
   res.setHeader("cache-control", "no-store");
-
   if (req.method === "OPTIONS") return res.status(204).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") return res.status(405).json({error:"Method not allowed"});
 
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) {
-    return res.status(500).json({
-      error: "GEMINI_API_KEY is not configured in Vercel environment variables."
-    });
-  }
-
-  const series = String(req.body?.series || "").trim().slice(0, 160);
+  const series = String(req.body?.series || "").trim().slice(0, MAX_INPUT);
   const url = String(req.body?.url || "").trim();
+  const imdbId = String(req.body?.imdbId || "").trim().toLowerCase();
+  if (!series && !imdbId) return res.status(400).json({error:"Series name or IMDb ID is required."});
+  if (url && badUrl(url)) return res.status(400).json({error:"A valid public http(s) episode URL is required when a URL is supplied."});
+  if (imdbId && !/^tt\d{7,10}$/i.test(imdbId)) return res.status(400).json({error:"IMDb ID must look like tt1234567."});
 
-  if (!series) return res.status(400).json({ error: "Series name is required." });
-  if (badUrl(url)) {
-    return res.status(400).json({ error: "A valid public http(s) episode URL is required." });
-  }
-
+  const imdb = await fetchCompactImdb(imdbId);
   let playlistHint = "";
-  try {
-    const r = await fetch(url, {
-      headers: {
-        "user-agent": "Mozilla/5.0",
-        accept: "application/vnd.apple.mpegurl,text/plain,*/*"
-      },
-      redirect: "follow",
-    });
-    // Kept small: even generous free tiers charge input tokens, and a huge
-    // playlist blob adds nothing an episode/series name search doesn't
-    // already give the model.
-    if (r.ok) playlistHint = (await r.text()).slice(0, 800);
-  } catch {}
-
-  const prompt = `You are the metadata agent for a personal anime watch library.
-
-User-provided series name:
-${series}
-
-Episode stream URL:
-${url}
-
-Identify the exact anime episode represented by this stream.
-
-Use web search when necessary. Prefer IMDb for IMDb-specific facts and
-reputable anime episode guides for episode numbering and titles.
-
-Return:
-1. Series name.
-2. Season number.
-3. Episode number.
-4. Official/common episode title.
-5. Concise episode summary.
-6. Concise series summary.
-7. Series IMDb ID, URL, release year, rating and genres.
-8. Episode IMDb ID, URL and rating when an individual IMDb episode page exists.
-
-Do NOT search for, provide, or infer subtitle download URLs. The user will
-supply subtitles separately.
-
-Never invent uncertain IDs, URLs, ratings or episode numbers. Say so plainly
-when something is unknown, and note weak evidence explicitly.
-
-Playlist text (may be empty):
-${playlistHint}`;
-
-  const geminiBase = (model) =>
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-  const jsonHeaders = { "content-type": "application/json" };
-
-  // Step 1: grounded research as free-form text. This model generation's
-  // built-in google_search tool and its strict JSON response mode can't
-  // both be relied on in the same call, so this stays a two-step pipeline,
-  // just within one provider instead of two.
-  let research;
-  try {
-    const result = await fetchWithRetry(geminiBase(MODEL), jsonHeaders, {
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-    });
-    if (!result.ok) {
-      return res.status(502).json({
-        error: `Gemini returned HTTP ${result.status}`,
-        detail: result.raw.slice(0, 1200),
-      });
-    }
-    let parsed;
-    try { parsed = JSON.parse(result.raw); }
-    catch { return res.status(502).json({ error: "Gemini returned invalid JSON." }); }
-    research = extractText(parsed);
-  } catch (e) {
-    return res.status(502).json({ error: `Gemini request failed: ${e?.message || e}` });
-  }
-  if (!research) return res.status(502).json({ error: "Gemini returned no research result." });
-  research = research.slice(0, 4000);
-
-  // Gemini's response schema is a restricted subset of OpenAPI's Schema
-  // object: no `type: [...]` unions for nullable fields. Nullability is
-  // expressed with a separate `nullable: true` flag instead.
-  const nullableString = { type: "string", nullable: true };
-  const nullableInteger = { type: "integer", nullable: true };
-  const nullableNumber = { type: "number", nullable: true };
-
-  const schema = {
-    type: "object",
-    properties: {
-      series: { type: "string" },
-      seasonNumber: nullableInteger,
-      episodeNumber: nullableInteger,
-      episodeCode: { type: "string" },
-      episodeTitle: { type: "string" },
-      confidence: { type: "string", enum: ["high", "medium", "low"] },
-
-      seriesYear: nullableInteger,
-      seriesImdbId: nullableString,
-      seriesImdbUrl: nullableString,
-      seriesImdbRating: nullableNumber,
-      seriesGenres: { type: "array", items: { type: "string" } },
-      seriesSummary: { type: "string" },
-
-      episodeImdbId: nullableString,
-      episodeImdbUrl: nullableString,
-      episodeImdbRating: nullableNumber,
-      episodeSummary: { type: "string" },
-
-      metadataNotes: { type: "string" }
-    },
-    required: [
-      "series","seasonNumber","episodeNumber","episodeCode","episodeTitle","confidence",
-      "seriesYear","seriesImdbId","seriesImdbUrl","seriesImdbRating","seriesGenres",
-      "seriesSummary","episodeImdbId","episodeImdbUrl","episodeImdbRating",
-      "episodeSummary","metadataNotes"
-    ]
-  };
-
-  // Step 2: turn the research text into the strict JSON shape the UI
-  // expects. No tools here, just responseSchema-constrained generation.
-  let response;
-  try {
-    const result = await fetchWithRetry(geminiBase(MODEL), jsonHeaders, {
-      contents: [{
-        role: "user",
-        parts: [{
-          text: `Convert the following research notes into the required structured fields. Use null where information is not confidently known.\n\nResearch notes:\n${research}`
-        }],
-      }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-      },
-    });
-    if (!result.ok) {
-      return res.status(502).json({
-        error: `Gemini returned HTTP ${result.status}`,
-        detail: result.raw.slice(0, 1200),
-      });
-    }
-    response = JSON.parse(result.raw);
-  } catch (e) {
-    return res.status(502).json({ error: `Gemini request failed: ${e?.message || e}` });
+  if (url) {
+    try {
+      const r = await fetch(url,{headers:{"user-agent":"Mozilla/5.0",accept:"application/vnd.apple.mpegurl,text/plain,*/*"},redirect:"follow"});
+      if (r.ok) playlistHint = (await r.text()).slice(0, 700);
+    } catch {}
   }
 
-  const text = extractText(response);
-  if (!text) return res.status(502).json({ error: "Gemini returned no structured result." });
-
-  let data;
-  try { data = JSON.parse(text); }
-  catch { return res.status(502).json({ error: "Gemini returned non-JSON metadata." }); }
-
-  for (const key of ["seriesImdbUrl", "episodeImdbUrl"]) {
-    if (data[key] && badUrl(data[key])) data[key] = null;
+  // If local evidence is enough, avoid an LLM call entirely.
+  const combined = `${url}\n${playlistHint}`;
+  const m = combined.match(/[Ss](\d{1,2})[ ._-]?[Ee](\d{1,3})/);
+  const localSeries = series || imdb.name || `IMDb ${imdbId}`;
+  if (m && imdb.name) {
+    return res.status(200).json(normalize({series:imdb.name,seasonNumber:Number(m[1]),episodeNumber:Number(m[2]),confidence:"high",seriesYear:imdb.year,seriesSummary:imdb.description,metadataNotes:"Resolved locally from IMDb JSON-LD and episode code."}, imdbId, localSeries));
+  }
+  if (imdb.name && !url && !series) {
+    return res.status(200).json(normalize({series:imdb.name,confidence:"high",seriesYear:imdb.year,seriesSummary:imdb.description,seriesImdbRating:imdb.rating,seriesGenres:imdb.genres,metadataNotes:"Resolved locally from IMDb JSON-LD; no LLM call needed."}, imdbId, localSeries));
   }
 
-  return res.status(200).json(data);
+  const prompt = buildPrompt({series,url,imdbId,imdb,playlistHint});
+  const order = String(process.env.LLM_PROVIDER_ORDER || "gemini,grok,openrouter").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean);
+  const providers = [];
+  for (const p of order) {
+    if (p === "gemini" && process.env.GEMINI_API_KEY) providers.push(["gemini", () => callGemini(process.env.GEMINI_API_KEY,prompt)]);
+    if (p === "grok" && process.env.XAI_API_KEY) providers.push(["grok", () => callOpenAICompatible("https://api.x.ai/v1",process.env.XAI_API_KEY,GROK_MODEL,prompt)]);
+    if (p === "openrouter" && process.env.OPENROUTER_API_KEY) providers.push(["openrouter", () => callOpenAICompatible("https://openrouter.ai/api/v1",process.env.OPENROUTER_API_KEY,OPENROUTER_MODEL,prompt,{"HTTP-Referer":process.env.OPENROUTER_HTTP_REFERER || "https://parallel.app","X-Title":"Parallel Anime Library"})]);
+  }
+  if (!providers.length) return res.status(500).json({error:"No LLM provider is configured. Add GEMINI_API_KEY, XAI_API_KEY, or OPENROUTER_API_KEY."});
+
+  const failures = [];
+  for (const [name, fn] of providers) {
+    try {
+      const data = normalize(await fn(), imdbId, localSeries);
+      if (data.series || data.episodeCode || data.episodeTitle) {
+        if (!data.seriesYear && imdb.year) data.seriesYear = imdb.year;
+        if (!data.seriesSummary && imdb.description) data.seriesSummary = imdb.description;
+        if (!data.seriesImdbRating && imdb.rating) data.seriesImdbRating = imdb.rating;
+        if (!data.seriesGenres.length && imdb.genres.length) data.seriesGenres = imdb.genres;
+        data.metadataNotes = `${data.metadataNotes || ""}${data.metadataNotes ? " " : ""}Provider: ${name}.`;
+        return res.status(200).json(data);
+      }
+      failures.push(`${name}: empty metadata`);
+    } catch (e) { failures.push(`${name}: ${e?.message || e}`); }
+  }
+
+  return res.status(502).json({error:"All configured metadata providers failed.",detail:failures.join(" | ")});
 }
