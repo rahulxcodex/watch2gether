@@ -362,6 +362,8 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 .landing-panel-head span{font-size:11px;color:var(--dimmer)}
 .library-form{padding:16px;border-bottom:1px solid var(--line)}
 .library-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.checkbox-field{display:flex;flex-direction:row;align-items:center;gap:8px}
+.checkbox-field input[type="checkbox"]{width:16px;height:16px;flex:none}
 .library-form .field{margin:0}
 .library-form .field.full{grid-column:1/-1}
 .library-form .row{margin-top:12px}
@@ -506,11 +508,15 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
                 <span class="eyebrow">IMDb ID <small id="imdbIdHint" hidden>· auto-filled</small></span>
                 <input class="input" name="imdbId" id="libraryImdbId" placeholder="tt1234567 (auto-fills as you type the name)" pattern="tt\d{7,10}" maxlength="12" required>
               </label>
-              <label class="field">
+              <label class="field full checkbox-field">
+                <input type="checkbox" id="libraryIsMovie" name="isMovie">
+                <span class="eyebrow">This is a movie <small>(no season/episode)</small></span>
+              </label>
+              <label class="field" id="seasonField">
                 <span class="eyebrow">Season</span>
                 <input class="input" name="seasonNumber" type="number" min="1" max="99" placeholder="1" required>
               </label>
-              <label class="field">
+              <label class="field" id="episodeField">
                 <span class="eyebrow">Episode</span>
                 <input class="input" name="episodeNumber" type="number" min="1" max="999" placeholder="1" required>
               </label>
@@ -532,7 +538,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
               </label>
               <div class="landing-ai-note full">
                 <b>Subtitles download automatically</b>
-                <span>Since you already entered the season and episode number, Parallel pulls the best matching English subtitle for that exact episode straight from OpenSubtitles — no separate lookup step. If none is found, you'll be asked whether to upload a file by hand instead.</span>
+                <span id="autoSubNote">Since you already entered the season and episode number, Parallel pulls the best matching English subtitle for that exact episode straight from OpenSubtitles — no separate lookup step. If none is found, you'll be asked whether to upload a file by hand instead.</span>
               </div>
             </div>
             <div class="row">
