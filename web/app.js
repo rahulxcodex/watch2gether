@@ -300,7 +300,7 @@ async function addLibraryEpisode(form) {
         episodeImdbId: null, episodeImdbUrl: null, episodeImdbRating: null,
         episodeSummary: "", metadataNotes: String(e.message || e),
       };
-      say("Grok lookup failed — saving the episode with your supplied details.");
+      say("Gemini lookup failed — saving the episode with your supplied details.");
     }
 
     const resolvedSeries = String(meta.series || seriesName).trim() || seriesName;
