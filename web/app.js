@@ -127,10 +127,13 @@ function isMovieItem(series, item) {
 function normalizeLibraryMediaTypes() {
   let changed = false;
   for (const series of MY_LIBRARY) {
+    // Never infer a movie merely because an old episode is missing S/E data.
+    // Early versions did not persist season/episode numbers, so that heuristic
+    // incorrectly converted whole TV libraries into movies. An explicit media
+    // type or the legacy "Movie" code is safe evidence; otherwise default to TV.
     const inferredMovie = series.mediaType === "movie" ||
       (Array.isArray(series.episodes) && series.episodes.length &&
-       series.episodes.every((e) => e.mediaType === "movie" || e.episodeCode === "Movie" ||
-         (e.seasonNumber == null && e.episodeNumber == null)));
+       series.episodes.every((e) => e.mediaType === "movie" || e.episodeCode === "Movie"));
     const nextSeriesType = inferredMovie ? "movie" : "series";
     if (series.mediaType !== nextSeriesType) {
       series.mediaType = nextSeriesType;
@@ -452,17 +455,31 @@ async function addLibraryEpisode(form) {
     }
 
     const resolvedSeries = String(meta.series || seriesName).trim() || seriesName;
-    // Season/episode number and code come from what was typed into the form,
-    // not from the identify step — the user already told us exactly which
-    // episode this is, so identify's guess never overrides it.
+    const desiredType = isMovie ? "movie" : "series";
+    // Season/episode numbers typed by the user always win over LLM metadata.
     const title = episodeOverride ||
-      [generatedCode, String(meta.episodeTitle || "").trim()].filter(Boolean).join(" · ") ||
-      isMovie ? (String(meta.title || meta.seriesTitle || resolvedSeries).trim() || resolvedSeries) : `Episode ${((findSeries(resolvedSeries)?.episodes.length || 0) + 1)}`;
+      (isMovie
+        ? (String(meta.title || meta.seriesTitle || resolvedSeries).trim() || resolvedSeries)
+        : ([generatedCode, String(meta.episodeTitle || "").trim()].filter(Boolean).join(" · ") || `Episode ${((findSeries(resolvedSeries)?.episodes.length || 0) + 1)}`));
 
     let series = MY_LIBRARY.find((x) => x.imdbId && x.imdbId.toLowerCase() === imdbId) || findSeries(resolvedSeries);
-    if (!series) {
+    if (series) {
+      const existingType = mediaTypeOf(series) === "movie" ? "movie" : "series";
+      if (series.episodes.length && existingType !== desiredType) {
+        return say(`"${series.name}" is already saved as a ${existingType}. Create a separate ${desiredType} entry instead.`);
+      }
+      Object.assign(series, {
+        year: Number.isInteger(meta.seriesYear) ? meta.seriesYear : (series.year ?? null),
+        mediaType: desiredType,
+        imdbId: series.imdbId || imdbId,
+        imdbUrl: meta.seriesImdbUrl || series.imdbUrl || `https://www.imdb.com/title/${imdbId}/`,
+        imdbRating: typeof meta.seriesImdbRating === "number" ? meta.seriesImdbRating : (series.imdbRating ?? null),
+        genres: Array.isArray(meta.seriesGenres) && meta.seriesGenres.length ? meta.seriesGenres.slice(0, 10) : (series.genres || []),
+        summary: String(meta.seriesSummary || series.summary || "").slice(0, 1200),
+      });
+    } else {
       series = {
-        id: makeId("series"), name: resolvedSeries.slice(0, 120), mediaType: isMovie ? "movie" : "series", episodes: [],
+        id: makeId("series"), name: resolvedSeries.slice(0, 120), mediaType: desiredType, episodes: [],
         year: Number.isInteger(meta.seriesYear) ? meta.seriesYear : null,
         imdbId, imdbUrl: meta.seriesImdbUrl || `https://www.imdb.com/title/${imdbId}/`,
         imdbRating: typeof meta.seriesImdbRating === "number" ? meta.seriesImdbRating : null,
@@ -470,27 +487,12 @@ async function addLibraryEpisode(form) {
         summary: String(meta.seriesSummary || "").slice(0, 1200), addedAt: Date.now(),
       };
       MY_LIBRARY.unshift(series);
-    } else {
-      Object.assign(series, {
-        year: Number.isInteger(meta.seriesYear) ? meta.seriesYear : (series.year ?? null),
-        mediaType: isMovie ? "movie" : (series.mediaType || "series"),
-        imdbId: series.imdbId || imdbId,
-        imdbUrl: meta.seriesImdbUrl || series.imdbUrl || `https://www.imdb.com/title/${imdbId}/`,
-        imdbRating: typeof meta.seriesImdbRating === "number" ? meta.seriesImdbRating : (series.imdbRating ?? null),
-        genres: Array.isArray(meta.seriesGenres) && meta.seriesGenres.length ? meta.seriesGenres.slice(0, 10) : (series.genres || []),
-        summary: String(meta.seriesSummary || series.summary || "").slice(0, 1200),
-      });
     }
 
-    const existingSeriesType = series.mediaType === "movie" ? "movie" : "series";
-    if (series.episodes.length && existingSeriesType !== (isMovie ? "movie" : "series")) {
-      return say(`"${series.name}" is already saved as a ${existingSeriesType}. Create a separate ${isMovie ? "movie" : "series"} entry instead.`);
-    }
-
-    const duplicate = series.episodes.find((e) => e.url === url) ||
-      (isMovie
-        ? series.episodes.find((e) => mediaTypeOf(series, e) === "movie")
-        : series.episodes.find((e) => !e.url && e.seasonNumber === season && e.episodeNumber === epNo));
+    // Same movie or same SxxExx should update instead of creating a duplicate.
+    const duplicate = isMovie
+      ? series.episodes.find((e) => mediaTypeOf(series, e) === "movie")
+      : series.episodes.find((e) => e.seasonNumber === season && e.episodeNumber === epNo);
     const episodePatch = {
       url,
       mediaType: itemMediaType,
@@ -817,10 +819,14 @@ async function saveEpisodeEdit(form) {
 
   if (submit) { submit.disabled = true; submit.textContent = downloadAgain ? "Saving & finding subtitles…" : "Saving…"; }
   try {
-    const oldSeason = ep.seasonNumber;
-    const oldEpisode = ep.episodeNumber;
-    const oldCode = ep.episodeCode;
+    const snapshot = JSON.parse(JSON.stringify(ep));
     const newCode = movie ? "Movie" : `S${String(season).padStart(2, "0")}E${String(epNo).padStart(2, "0")}`;
+
+    if (!movie) {
+      const collision = series.episodes.find((other) => other.id !== ep.id &&
+        other.seasonNumber === season && other.episodeNumber === epNo);
+      if (collision) return say(`${newCode} is already assigned to another saved episode.`);
+    }
 
     ep.title = title || (movie ? series.name : newCode);
     ep.mediaType = movie ? "movie" : "episode";
@@ -845,10 +851,7 @@ async function saveEpisodeEdit(form) {
           ok: "Keep existing",
         });
         if (choice == null) {
-          ep.seasonNumber = oldSeason;
-          ep.episodeNumber = oldEpisode;
-          ep.episodeCode = oldCode;
-          ep.updatedAt = Date.now();
+          Object.assign(ep, snapshot);
           return;
         }
       }
@@ -889,15 +892,20 @@ async function saveEpisodeEdit(form) {
   }
 }
 
-const TMDB_CACHE_KEY = "wtTmdbV1";
+const TMDB_CACHE_KEY = "wtTmdbV2";
+const TMDB_SEASON_CACHE_KEY = "wtTmdbSeasonsV1";
 const TMDB_IMG = "https://image.tmdb.org/t/p/";
 let TMDB_CACHE = readStore(TMDB_CACHE_KEY, {});
+let TMDB_SEASON_CACHE = readStore(TMDB_SEASON_CACHE_KEY, {});
 let activeLibraryTitle = null;
 let tmdbHydrationInFlight = false;
 let tmdbUnavailable = false;
 
 function saveTmdbCache() {
   try { localStorage.setItem(TMDB_CACHE_KEY, JSON.stringify(TMDB_CACHE)); } catch {}
+}
+function saveTmdbSeasonCache() {
+  try { localStorage.setItem(TMDB_SEASON_CACHE_KEY, JSON.stringify(TMDB_SEASON_CACHE)); } catch {}
 }
 
 function tmdbArt(series) {
@@ -927,6 +935,122 @@ async function fetchTmdbArt(series, force = false) {
   } catch {
     return null;
   }
+}
+
+async function fetchTmdbSeason(series, seasonNumber, force = false) {
+  const art = tmdbArt(series);
+  const tmdbId = art?.tmdbId;
+  if (!tmdbId || mediaTypeOf(series) === "movie") return null;
+  const key = `${tmdbId}:s${seasonNumber}`;
+  if (!force && TMDB_SEASON_CACHE[key]) return TMDB_SEASON_CACHE[key];
+  try {
+    const params = new URLSearchParams({ action: "season", type: "tv", tmdbId: String(tmdbId), season: String(seasonNumber) });
+    const r = await fetch(`/api/tmdb?${params.toString()}`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data?.ok) throw new Error(data?.error || `TMDB season HTTP ${r.status}`);
+    TMDB_SEASON_CACHE[key] = data;
+    saveTmdbSeasonCache();
+    return data;
+  } catch (e) {
+    console.warn("TMDB season lookup failed", e);
+    return null;
+  }
+}
+
+function fmtRuntime(minutes) {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `${Math.floor(n / 60) ? `${Math.floor(n / 60)}h ` : ""}${n % 60}m`.trim();
+}
+
+function tmdbRichMeta(series) {
+  const art = tmdbArt(series) || {};
+  const bits = [];
+  const year = art.year || series.year;
+  if (year) bits.push(String(year));
+  if (art.rating != null) bits.push(`★ ${Number(art.rating).toFixed(1)}`);
+  if (art.voteCount) bits.push(`${Number(art.voteCount).toLocaleString()} votes`);
+  const runtime = art.runtime || art.episodeRunTime?.[0];
+  if (runtime) bits.push(fmtRuntime(runtime));
+  if (art.status) bits.push(art.status);
+  return bits;
+}
+
+function seasonNumbers(series) {
+  const art = tmdbArt(series);
+  const fromTmdb = Array.isArray(art?.seasons) ? art.seasons.map(s => Number(s.seasonNumber)).filter(Number.isInteger) : [];
+  const fromLocal = (series.episodes || []).map(e => Number(e.seasonNumber)).filter(n => Number.isInteger(n) && n > 0);
+  return [...new Set([...fromTmdb, ...fromLocal])].sort((a,b) => a-b);
+}
+
+function localEpisodesForSeason(series, season) {
+  return (series.episodes || []).filter(e => Number(e.seasonNumber) === Number(season)).sort((a,b) => (a.episodeNumber || 9999) - (b.episodeNumber || 9999));
+}
+
+function renderInlineEpisode(series, ep, tmdbEp) {
+  const wrap = document.createElement("article");
+  wrap.className = "inline-episode";
+  const still = document.createElement("div");
+  still.className = "inline-episode-still";
+  const stillPath = tmdbEp?.stillPath;
+  if (stillPath) still.style.backgroundImage = `url("${TMDB_IMG}w300${stillPath}")`;
+  const copy = document.createElement("div");
+  copy.className = "inline-episode-copy";
+  const n = tmdbEp?.episodeNumber ?? ep?.episodeNumber;
+  const title = tmdbEp?.name || ep?.title || `Episode ${n || ""}`;
+  const rating = tmdbEp?.rating != null ? `★ ${Number(tmdbEp.rating).toFixed(1)}` : "";
+  const date = tmdbEp?.airDate ? new Date(tmdbEp.airDate + "T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}) : "";
+  const meta = [`E${String(n || "").padStart(2,"0")}`, rating, date, tmdbEp?.runtime ? fmtRuntime(tmdbEp.runtime) : ""].filter(Boolean).join(" · ");
+  copy.innerHTML = `<div class="inline-episode-title">${esc(title)}</div><div class="inline-episode-meta">${esc(meta)}</div><div class="inline-episode-overview">${esc(tmdbEp?.overview || ep?.episodeSummary || "")}</div>`;
+  const actions = document.createElement("div");
+  actions.className = "inline-episode-actions";
+  const watch = document.createElement("button"); watch.type="button"; watch.className="btn primary"; watch.textContent=ep?.url?"▶ Watch":"Add link";
+  watch.onclick=()=> ep?.url ? watchLibraryEpisode(series, ep) : openLibraryForm(series.name);
+  const edit = document.createElement("button"); edit.type="button"; edit.className="btn ghost"; edit.textContent="Edit"; edit.onclick=()=>openEpisodeEdit(series, ep);
+  actions.append(watch, edit); copy.appendChild(actions); wrap.append(still,copy); return wrap;
+}
+
+async function openInlineSeries(series) {
+  const panel = $("#libraryInlineExpand");
+  if (!panel) return openLibraryDetail(series);
+  if (panel.dataset.seriesId === String(series.id) && !panel.hidden) { panel.hidden = true; panel.innerHTML=""; panel.dataset.seriesId=""; return; }
+  panel.dataset.seriesId = String(series.id); panel.hidden = false;
+  const art = tmdbArt(series);
+  const genres = (art?.genres || []).map(g=>g.name).filter(Boolean).join(" · ");
+  const cast = (art?.credits?.cast || []).slice(0,5).map(c=>c.name).filter(Boolean).join(", ");
+  panel.innerHTML = `<div class="inline-expand-hero" style="${backdropUrl(art)?`background-image:url("${backdropUrl(art)}")`:""}"><div class="inline-expand-copy"><h3>${esc(art?.title || series.name || "Series")}</h3><div class="inline-expand-meta">${tmdbRichMeta(series).map(x=>`<span>${esc(x)}</span>`).join("")}</div><p>${esc(art?.overview || series.summary || "No synopsis available.")}</p>${genres?`<div class="inline-expand-genres">${esc(genres)}</div>`:""}${cast?`<div class="inline-expand-cast"><b>Cast:</b> ${esc(cast)}</div>`:""}</div></div><div class="inline-expand-body"><div class="season-tabs" id="inlineSeasonTabs"><span class="inline-loading">Loading seasons…</span></div><div id="inlineSeasonContent"><div class="inline-loading">Loading…</div></div></div>`;
+  const tabs = panel.querySelector("#inlineSeasonTabs");
+  const content = panel.querySelector("#inlineSeasonContent");
+  const seasons = seasonNumbers(series);
+  if (!seasons.length) { content.innerHTML='<div class="inline-error">No seasons found for this series yet. Add an episode with a season number.</div>'; tabs.innerHTML=""; return; }
+  tabs.innerHTML="";
+  const renderSeason = async (season) => {
+    tabs.querySelectorAll(".season-tab").forEach(b=>b.classList.toggle("active", Number(b.dataset.season)===Number(season)));
+    content.innerHTML='<div class="inline-loading">Loading season details and episode ratings from TMDB…</div>';
+    const tmdbSeason = await fetchTmdbSeason(series, season);
+    const local = localEpisodesForSeason(series, season);
+    const tmdbEpisodes = tmdbSeason?.episodes || [];
+    const merged = [];
+    const max = Math.max(local.length, tmdbEpisodes.length);
+    for (let i=0;i<max;i++) {
+      const te = tmdbEpisodes[i];
+      const le = local.find(x=>Number(x.episodeNumber)===Number(te?.episodeNumber)) || local[i];
+      if (le || te) merged.push({local:le, tmdb:te});
+    }
+    const seasonInfo = (tmdbArt(series)?.seasons || []).find(s=>Number(s.seasonNumber)===Number(season));
+    const sr = tmdbSeason?.rating ?? seasonInfo?.rating;
+    const sv = tmdbSeason?.voteCount ?? seasonInfo?.voteCount;
+    content.innerHTML = `<div class="inline-season-head"><h4>${esc(tmdbSeason?.name || `Season ${season}`)}</h4><span>${[tmdbSeason?.episodeCount ? `${tmdbSeason.episodeCount} episodes` : "", sr!=null?`★ ${Number(sr).toFixed(1)} season rating`:"", sv?`${Number(sv).toLocaleString()} votes`:""].filter(Boolean).join(" · ")}</span></div><div class="inline-episodes"></div>`;
+    const grid=content.querySelector(".inline-episodes");
+    for(const item of merged) grid.appendChild(renderInlineEpisode(series,item.local,item.tmdb));
+    if(!merged.length) grid.innerHTML='<div class="inline-loading">No episodes found for this season.</div>';
+  };
+  seasons.forEach(season=>{
+    const meta=(art?.seasons||[]).find(s=>Number(s.seasonNumber)===season);
+    const b=document.createElement("button"); b.type="button"; b.className="season-tab"; b.dataset.season=season; b.innerHTML=`Season ${season}<small>${meta?.episodeCount||localEpisodesForSeason(series,season).length||0} eps${meta?.rating!=null?` · ★ ${Number(meta.rating).toFixed(1)}`:""}</small>`; b.onclick=()=>renderSeason(season); tabs.appendChild(b);
+  });
+  await renderSeason(seasons[0]);
+  panel.scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 
 async function hydrateLibraryArt() {
@@ -973,13 +1097,42 @@ function openLibraryDetail(series) {
   list.innerHTML = "";
   const isMovie = mediaTypeOf(series) === "movie";
   $("#libraryDetailHeading").textContent = isMovie ? "Movie" : "Episodes";
+  const addBtn = $("#libraryDetailAdd");
+  if (addBtn) {
+    addBtn.textContent = isMovie ? "Edit movie" : "+ Add episode";
+    addBtn.onclick = () => {
+      if (isMovie) {
+        const only = series.episodes?.[0];
+        if (only) openEpisodeEdit(series, only);
+      } else {
+        $("#libraryDetail").hidden = true;
+        openLibraryForm(series.name);
+      }
+    };
+  }
   for (const ep of (series.episodes || [])) {
     const row = document.createElement("div");
     row.className = "detail-episode";
     const code = isMovie ? "Movie" : (ep.episodeCode || `S${String(ep.seasonNumber || 1).padStart(2, "0")}E${String(ep.episodeNumber || 1).padStart(2, "0")}`);
-    row.innerHTML = `<div style="min-width:0;flex:1"><b>${esc(ep.title || code)}</b><small>${esc(code)}${ep.subtitleText ? " · English subtitles" : " · No subtitles"}</small></div><button class="btn ghost edit-episode-btn" type="button">Edit</button><button class="btn primary watch-episode-btn" type="button">${ep.url ? "Watch" : "Add link"}</button>`;
-    row.querySelector(".edit-episode-btn").onclick = () => openEpisodeEdit(series, ep);
-    row.querySelector(".watch-episode-btn").onclick = () => {
+    const info = document.createElement("div");
+    info.className = "detail-episode-info";
+    const title = document.createElement("b");
+    title.textContent = ep.title || code;
+    const meta = document.createElement("small");
+    meta.textContent = `${code} · ${ep.subtitleText ? "English subtitles" : "No subtitles"}`;
+    info.append(title, meta);
+    const editBtn = document.createElement("button");
+    editBtn.className = "btn ghost edit-episode-btn";
+    editBtn.type = "button";
+    editBtn.textContent = "Edit";
+    const watchBtn = document.createElement("button");
+    watchBtn.className = "btn primary watch-episode-btn";
+    watchBtn.type = "button";
+    watchBtn.textContent = ep.url ? "Watch" : "Add link";
+    row.append(info, editBtn, watchBtn);
+    editBtn.onclick = (e) => { e.stopPropagation(); openEpisodeEdit(series, ep); };
+    watchBtn.onclick = (e) => {
+      e.stopPropagation();
       $("#libraryDetail").hidden = true;
       if (ep.url) watchLibraryEpisode(series, ep);
       else openLibraryForm(series.name);
@@ -995,12 +1148,43 @@ function renderNetflixCard(series) {
   const meta = titleMeta(series).filter((x) => x !== type).slice(0, 2).join(" · ");
   const card = document.createElement("article");
   card.className = "netflix-card";
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  card.setAttribute("aria-label", `Open ${series.name || type}`);
+
   const poster = posterUrl(art);
-  card.innerHTML = poster
-    ? `<img src="${esc(poster)}" alt="" loading="lazy"><div class="netflix-card-info"><b>${esc(series.name)}</b><span>${esc(meta || type)}</span></div>`
-    : `<div class="poster-fallback">${esc(series.name)}</div><div class="netflix-card-info"><b>${esc(series.name)}</b><span>${esc(meta || type)}</span></div>`;
-  card.onclick = () => openLibraryDetail(series);
+  if (poster) {
+    const img = document.createElement("img");
+    img.src = poster;
+    img.alt = series.name || type;
+    img.loading = "lazy";
+    img.addEventListener("error", () => {
+      img.replaceWith(makePosterFallback(series.name || type));
+    }, { once: true });
+    card.appendChild(img);
+  } else {
+    card.appendChild(makePosterFallback(series.name || type));
+  }
+
+  const shade = document.createElement("div");
+  shade.className = "netflix-card-shade";
+  const info = document.createElement("div");
+  info.className = "netflix-card-info";
+  info.innerHTML = `<b>${esc(series.name || "Untitled")}</b><span>${esc(meta || type)}</span>`;
+  card.append(shade, info);
+  const open = () => mediaTypeOf(series) === "movie" ? openLibraryDetail(series) : openInlineSeries(series);
+  card.addEventListener("click", open);
+  card.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+  });
   return card;
+}
+
+function makePosterFallback(name) {
+  const el = document.createElement("div");
+  el.className = "poster-fallback";
+  el.textContent = name;
+  return el;
 }
 
 function renderLanding() {
@@ -1013,7 +1197,7 @@ function renderLanding() {
 
   const movies = MY_LIBRARY.filter((s) => mediaTypeOf(s) === "movie");
   const series = MY_LIBRARY.filter((s) => mediaTypeOf(s) !== "movie");
-  allRow.innerHTML = movies.length || series.length ? "" : "";
+  allRow.innerHTML = "";
   moviesRow.innerHTML = "";
   seriesRow.innerHTML = "";
   if (count) count.textContent = `${MY_LIBRARY.length} title${MY_LIBRARY.length === 1 ? "" : "s"}`;

@@ -368,8 +368,99 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 .imdb-suggest-item{display:flex;align-items:center;gap:9px;padding:7px 10px;cursor:pointer;border-bottom:1px solid #282828}.imdb-suggest-item:last-child{border-bottom:0}.imdb-suggest-item:hover,.imdb-suggest-item.active{background:#242424}.imdb-suggest-item img{width:28px;height:40px;object-fit:cover;border-radius:3px;background:#222;flex-shrink:0}.imdb-suggest-item .imdb-suggest-info{min-width:0;flex:1}.imdb-suggest-item .imdb-suggest-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.imdb-suggest-item .imdb-suggest-meta{font-size:10px;color:#888}.imdb-suggest-item .imdb-suggest-badge{font-size:9px;padding:2px 6px;border-radius:20px;border:1px solid #333;color:#888;flex-shrink:0}.imdb-suggest-empty{padding:9px 10px;font-size:11px;color:#777}
 .library-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.checkbox-field{display:flex;flex-direction:row;align-items:center;gap:8px}.checkbox-field input[type="checkbox"]{width:16px;height:16px;flex:none}.library-form .field{margin:0}.library-form .field.full{grid-column:1/-1}.library-form .row{margin-top:12px}.landing-ai-note{padding:11px 12px;border:1px solid #2c2c2c;border-radius:7px;background:#1b1b1b;font-size:11px;line-height:1.45}.landing-ai-note b{display:block;color:#eee;font-weight:500;margin-bottom:3px}.landing-ai-note span{color:#999}.imdb-link{color:#e4b15f;text-decoration:none;font-size:10px}.library-summary{margin:8px 0 2px;color:#999;font-size:11px;line-height:1.5}.episode-summary{margin:5px 0 0;color:#777;font-size:10.5px;line-height:1.45}
 /* Detail modal */
-.library-detail{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.78);backdrop-filter:blur(10px);display:grid;place-items:center;padding:18px}.library-detail[hidden]{display:none}.library-detail-card{position:relative;width:min(940px,100%);max-height:92dvh;overflow:auto;background:#141414;border-radius:9px;box-shadow:0 30px 100px rgba(0,0,0,.75);border:1px solid #2a2a2a}.library-detail-hero{position:relative;min-height:310px;background:#1c1c1c center/cover no-repeat}.library-detail-hero:after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,#141414 0%,rgba(20,20,20,.18) 58%,rgba(0,0,0,.25) 100%)}.library-detail-copy{position:absolute;z-index:2;left:28px;right:28px;bottom:25px;max-width:650px}.library-detail-copy h2{margin:0 0 8px;font-size:30px;line-height:1.05}.library-detail-copy p{margin:0;color:#bbb;font-size:12px;line-height:1.5}.library-detail-close{position:absolute;z-index:4;right:12px;top:10px;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px}.library-detail-body{padding:18px 24px 26px}.library-detail-body h3{font-size:15px;margin:0 0 12px}.detail-episodes{display:grid;grid-template-columns:1fr 1fr;gap:8px}.detail-episode{display:flex;gap:10px;align-items:center;padding:10px;background:#1b1b1b;border-radius:5px}.detail-episode b{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.detail-episode small{display:block;color:#777;font-size:9px;margin-top:3px}.detail-episode .btn{margin-left:0;flex:none;padding:7px 10px;font-size:10px}.detail-episode .edit-episode-btn{margin-left:auto}
+.library-inline-expand{margin:10px 2px 4px;border:1px solid #293545;border-radius:10px;overflow:hidden;background:#111720;box-shadow:0 18px 55px rgba(0,0,0,.35)}
+.library-inline-expand[hidden]{display:none}
+.inline-expand-hero{position:relative;min-height:245px;background:#18212c center/cover no-repeat}
+.inline-expand-hero:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,14,20,.96) 0%,rgba(10,14,20,.68) 48%,rgba(10,14,20,.18) 100%)}
+.inline-expand-copy{position:relative;z-index:2;padding:28px;max-width:720px}.inline-expand-copy h3{font-size:28px;margin:0 0 8px;color:#fff}.inline-expand-copy p{margin:0 0 12px;color:#c2cbd6;line-height:1.5;font-size:12px}.inline-expand-meta{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}.inline-expand-meta span{padding:5px 8px;border:1px solid #3a4657;border-radius:999px;color:#dce4ee;font-size:10px;background:rgba(0,0,0,.28)}
+.inline-expand-genres{color:#9ca9b8;font-size:10px;margin-bottom:12px}.inline-expand-cast{color:#9ca9b8;font-size:10px}.inline-expand-body{padding:18px 24px 24px}.season-tabs{display:flex;gap:7px;overflow:auto;padding-bottom:10px}.season-tab{flex:none;border:1px solid #344154;background:#17202b;color:#dce4ee;border-radius:7px;padding:8px 11px;font-size:10px;cursor:pointer}.season-tab.active{background:#5eead4;color:#071a18;border-color:#5eead4}.season-tab small{display:block;opacity:.75;margin-top:3px}.inline-season-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin:8px 0 12px}.inline-season-head h4{margin:0;color:#fff;font-size:15px}.inline-season-head span{font-size:10px;color:#91a0b1}.inline-episodes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.inline-episode{display:grid;grid-template-columns:120px 1fr;gap:12px;background:#18212c;border:1px solid #293545;border-radius:8px;overflow:hidden;min-height:92px}.inline-episode-still{background:#10151c center/cover no-repeat;min-height:92px}.inline-episode-copy{padding:10px 10px 10px 0;min-width:0}.inline-episode-title{font-size:12px;color:#f5f7fa;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.inline-episode-meta{font-size:9px;color:#91a0b1;margin-top:4px}.inline-episode-overview{font-size:9px;color:#aab5c2;line-height:1.45;margin-top:6px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.inline-episode-actions{display:flex;gap:6px;margin-top:7px}.inline-episode-actions .btn{font-size:9px;min-height:28px;padding:5px 8px}.inline-loading,.inline-error{padding:18px;color:#aeb8c5;font-size:11px}.inline-error{color:#f6b7b7}
+@media(max-width:760px){.inline-expand-copy{padding:22px 18px}.inline-expand-copy h3{font-size:23px}.inline-expand-body{padding:15px}.inline-episodes{grid-template-columns:1fr}.inline-episode{grid-template-columns:105px 1fr}}
+.library-detail{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.78);backdrop-filter:blur(10px);display:grid;place-items:center;padding:18px}.library-detail[hidden]{display:none}.library-detail-card{position:relative;width:min(940px,100%);max-height:92dvh;overflow:auto;background:#141414;border-radius:9px;box-shadow:0 30px 100px rgba(0,0,0,.75);border:1px solid #2a2a2a}.library-detail-hero{position:relative;min-height:310px;background:#1c1c1c center/cover no-repeat}.library-detail-hero:after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,#141414 0%,rgba(20,20,20,.18) 58%,rgba(0,0,0,.25) 100%)}.library-detail-copy{position:absolute;z-index:2;left:28px;right:28px;bottom:25px;max-width:650px}.library-detail-copy h2{margin:0 0 8px;font-size:30px;line-height:1.05}.library-detail-copy p{margin:0;color:#bbb;font-size:12px;line-height:1.5}.library-detail-close{position:absolute;z-index:4;right:12px;top:10px;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px}.library-detail-body{padding:18px 24px 26px}.detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.detail-head h3{font-size:15px;margin:0}.detail-add-btn{min-height:36px;padding:7px 12px;font-size:11px}.library-detail-body h3{font-size:15px;margin:0 0 12px}.detail-episodes{display:grid;grid-template-columns:1fr 1fr;gap:8px}.detail-episode{display:flex;gap:10px;align-items:center;padding:10px;background:#1b1b1b;border-radius:5px}.detail-episode b{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.detail-episode small{display:block;color:#777;font-size:9px;margin-top:3px}.detail-episode .btn{margin-left:0;flex:none;padding:7px 10px;font-size:10px}.detail-episode .edit-episode-btn{margin-left:auto}
 @media(max-width:760px){.netflix-nav-links{display:none}.netflix-nav{gap:12px}.netflix-hero{min-height:480px;padding:120px 20px 42px}.netflix-hero h1{font-size:40px}.netflix-main{padding:0 16px}.netflix-card{flex-basis:132px}.netflix-form-card .library-form-grid{grid-template-columns:1fr}.netflix-form-card .field.full{grid-column:auto}.detail-episodes{grid-template-columns:1fr}.library-detail-copy{left:18px;right:18px}.library-detail-body{padding:15px}.netflix-nav-actions .btn:first-child{display:none}}
+
+/* ------------------------------------------------------------------ landing polish / bug-proofing */
+.netflix-nav{background:linear-gradient(180deg,rgba(7,9,13,.98) 0%,rgba(7,9,13,.9) 70%,rgba(7,9,13,0) 100%);}
+.netflix-nav-links{align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none;}
+.netflix-nav-links::-webkit-scrollbar{display:none;}
+.netflix-nav-links button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:7px 11px;border:1px solid transparent;border-radius:8px;color:#b9c2cf;background:transparent;font-size:12px;white-space:nowrap;transition:color .15s,background .15s,border-color .15s;}
+.netflix-nav-links button:hover,.netflix-nav-links button:focus-visible{color:#fff;background:#171c25;border-color:#293242;}
+.netflix-nav-actions{align-items:center;}
+.netflix-nav .btn{color:#f4f7fb!important;min-height:36px;display:inline-flex;align-items:center;justify-content:center;}
+.netflix-nav .btn.ghost{background:#151a22;border-color:#2a3443;}
+.netflix-nav .btn.ghost:hover{background:#202733;border-color:#394658;}
+.netflix-nav .btn.primary{color:#071a18!important;background:#5eead4;border-color:#5eead4;}
+.netflix-hero{isolation:isolate;background:radial-gradient(circle at 75% 30%,#202733 0,#0d1118 35%,#08090c 72%);}
+.netflix-hero-copy{padding-top:24px;}
+.netflix-kicker{color:#6ee7d6;font-weight:700;}
+.netflix-meta span{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(12,15,20,.58);}
+.netflix-meta .rating{border-color:rgba(245,190,88,.28);color:#f5c76b;}
+.netflix-hero-actions .btn{min-height:42px;display:inline-flex;align-items:center;justify-content:center;color:#f7f9fc!important;}
+.netflix-hero-actions .btn.watch{color:#0a1014!important;}
+.netflix-hero-actions .btn.ghost{background:rgba(20,25,33,.88);border-color:#354153;}
+.netflix-hero-actions .btn.ghost:hover{background:#232b37;border-color:#4a596d;}
+.netflix-section{scroll-margin-top:78px;}
+.netflix-section-head h2{color:#f4f7fb;}
+.netflix-section-head span{color:#8995a7;}
+.netflix-row,.netflix-rooms{overscroll-behavior-inline:contain;}
+.netflix-card{border:1px solid rgba(255,255,255,.06);outline:none;}
+.netflix-card:focus-visible{box-shadow:0 0 0 3px #5eead4,0 16px 34px rgba(0,0,0,.55);}
+.netflix-card-shade{position:absolute;z-index:1;inset:35% 0 0;background:linear-gradient(180deg,transparent 0%,rgba(0,0,0,.86) 100%);pointer-events:none;}
+.netflix-card-info{bottom:11px;}
+.netflix-card-info b{font-size:12.5px;color:#fff;}
+.netflix-card-info span{color:#d0d6df;}
+.poster-fallback{color:#eef2f7!important;background:radial-gradient(circle at 30% 20%,#2b3544,#0e1218 70%)!important;}
+.netflix-room{background:linear-gradient(145deg,#181e27,#10141a);border-color:#293343;box-shadow:0 8px 24px rgba(0,0,0,.22);}
+.netflix-room b{color:#f1f5f9;}
+.netflix-room .mono{color:#9aa7b8;}
+.netflix-room small{color:#7f8b9d;}
+.netflix-room-actions .btn{min-height:34px;display:inline-flex;align-items:center;justify-content:center;color:#f3f6fa!important;}
+.netflix-room-actions .btn.primary{color:#071a18!important;}
+.netflix-empty{background:#11161e;color:#aab4c2;border-color:#2b3645;}
+.netflix-empty b{color:#eef2f7;}
+.netflix-credit{color:#707b8c;}
+.netflix-form-card{background:#121821;border-color:#2b3748;color:#edf2f8;}
+.netflix-form-card .library-form-head{border-color:#293443;}
+.netflix-form-card .library-form-head b{color:#f5f7fa;}
+.netflix-close{color:#aeb8c6;min-width:38px;min-height:38px;border-radius:8px;display:grid;place-items:center;}
+.netflix-close:hover{background:#1c2531;color:#fff;}
+.netflix-form-card .input{background:#0f151e;border-color:#2b3747;color:#eef2f7;}
+.netflix-form-card .input:focus{background:#131b26;border-color:#5eead4;}
+.netflix-form-card .btn{min-height:40px;color:#f3f6fa!important;}
+.netflix-form-card .btn.primary{color:#061c18!important;}
+.netflix-form-card .landing-ai-note{background:#101720;border-color:#2b3747;}
+.netflix-form-card .landing-ai-note b{color:#eef2f7;}
+.library-detail-card{background:#111720;border-color:#2c3747;}
+.library-detail-body{background:#111720;}
+.library-detail-body h3{color:#f4f7fb;}
+.detail-episode{background:#18212c;border:1px solid #293545;min-width:0;}
+.detail-episode-info{min-width:0;flex:1;}
+.detail-episode-info b{display:block;color:#f2f5f9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.detail-episode-info small{color:#93a0b1;}
+.detail-episode .btn{min-height:34px;display:inline-flex;align-items:center;justify-content:center;color:#f5f7fa!important;border-color:#3a4657;}
+.detail-episode .btn.primary{color:#071a18!important;}
+@media(max-width:760px){
+  .netflix-nav{height:58px;padding:0 14px;}
+  .netflix-brand b{font-size:21px;}
+  .netflix-nav-links{display:flex;flex:1;min-width:0;}
+  .netflix-nav-actions .btn:first-child{display:none;}
+  .netflix-nav-actions .btn{padding:7px 10px;}
+  .netflix-hero{min-height:500px;margin-top:-58px;padding:100px 18px 34px;}
+  .netflix-hero h1{font-size:38px;max-width:10ch;}
+  .netflix-summary{font-size:13px;}
+  .netflix-hero-actions{flex-wrap:wrap;}
+  .netflix-hero-actions .btn{flex:1 1 130px;}
+  .netflix-main{padding:0 14px;}
+  .netflix-card{flex-basis:138px;}
+  .detail-episodes{grid-template-columns:1fr;}
+  .detail-episode{align-items:center;}
+  .detail-episode .btn{padding:7px 9px;}
+}
+@media(max-width:430px){
+  .netflix-brand .mark-bars{display:none;}
+  .netflix-nav-links button{padding-inline:8px;font-size:11px;}
+  .netflix-hero-actions .btn{flex-basis:100%;}
+}
+
 </style>
 </head>
 <body>
@@ -422,6 +513,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
       <section class="netflix-section" id="seriesSection" hidden>
         <div class="netflix-section-head"><h2>Series</h2><span>Episodes ready to watch</span></div>
         <div class="netflix-row" id="seriesRow"></div>
+        <div id="libraryInlineExpand" class="library-inline-expand" hidden></div>
       </section>
 
       <section class="netflix-section" id="allSection">
@@ -491,7 +583,7 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
   <div class="library-detail-card">
     <button class="library-detail-close" id="libraryDetailClose" type="button">×</button>
     <div class="library-detail-hero" id="libraryDetailHero"><div class="library-detail-copy"><h2 id="libraryDetailTitle"></h2><p id="libraryDetailSummary"></p></div></div>
-    <div class="library-detail-body"><h3 id="libraryDetailHeading">Episodes</h3><div class="detail-episodes" id="libraryDetailEpisodes"></div></div>
+    <div class="library-detail-body"><div class="detail-head"><h3 id="libraryDetailHeading">Episodes</h3><button class="btn primary detail-add-btn" id="libraryDetailAdd" type="button">+ Add</button></div><div class="detail-episodes" id="libraryDetailEpisodes"></div></div>
   </div>
 </div>
 
@@ -734,9 +826,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
 
       <div id="uploads"></div>
       <div class="lib-list" id="lists">
-        <div class="sect" id="shelfSect" hidden><span class="eyebrow">Shelf</span></div>
+        <div class="sect" id="shelfSect" hidden><span class="eyebrow">Saved media</span></div>
         <div id="shelfList"></div>
-        <div class="sect" id="libSect" hidden><span class="eyebrow">Bucket</span></div>
+        <div class="sect" id="libSect" hidden><span class="eyebrow">Uploaded files</span></div>
         <div id="libList"></div>
         <div class="hollow" id="listEmpty">
           Nothing saved yet.<br><br>
