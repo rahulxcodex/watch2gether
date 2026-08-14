@@ -215,12 +215,12 @@ let MY_LIBRARY = readStore(LIBRARY_KEY, []);
 let SAVED_ROOMS = readStore(ROOMS_KEY, []);
 
 function writeLibrary() {
-  localStorage.setItem(LIBRARY_KEY, JSON.stringify(MY_LIBRARY));
+  try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(MY_LIBRARY)); } catch {}
   renderLanding();
 }
 
 function writeRooms() {
-  localStorage.setItem(ROOMS_KEY, JSON.stringify(SAVED_ROOMS));
+  try { localStorage.setItem(ROOMS_KEY, JSON.stringify(SAVED_ROOMS)); } catch {}
   renderLanding();
 }
 
@@ -229,7 +229,7 @@ function rememberRoom(code, patch = {}) {
   const now = Date.now();
   const i = SAVED_ROOMS.findIndex((r) => r.code === code);
   const base = i >= 0 ? SAVED_ROOMS[i] : {
-    code, name: localStorage.wtName || "Guest", createdAt: now
+    code, name: (() => { try { return localStorage.wtName || "Guest"; } catch { return "Guest"; } })(), createdAt: now
   };
   const next = {
     ...base,
@@ -242,7 +242,14 @@ function rememberRoom(code, patch = {}) {
   SAVED_ROOMS = SAVED_ROOMS
     .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))
     .slice(0, 30);
-  localStorage.setItem(ROOMS_KEY, JSON.stringify(SAVED_ROOMS));
+  // Persisting the saved-room list is a nice-to-have, not a prerequisite for
+  // entering the room. On iOS Safari private mode / some in-app webviews,
+  // localStorage.setItem throws (quota or storage disabled). That used to be
+  // an *uncaught* exception thrown straight out of join() right after a
+  // successful sign-in — because it happened before the gate was hidden, the
+  // screen stayed frozen on "Signing in…" forever even though auth had
+  // already succeeded. Never let storage failures block the UI transition.
+  try { localStorage.setItem(ROOMS_KEY, JSON.stringify(SAVED_ROOMS)); } catch {}
 }
 
 function removeSavedRoom(code) {
@@ -2207,19 +2214,26 @@ async function join() {
     return void (err.textContent = hint);
   }
 
-  localStorage.wtName = name;
   R.name = name;
   R.room = code;
   R.uid = R.uid || auth.currentUser?.uid;
   if (!R.uid) { $("#enter").disabled = false; return void (err.textContent = "Firebase Authentication did not return a user."); }
   location.hash = code;
 
+  // Everything above this point is required to enter the room. Everything
+  // below (remembering the name/room in localStorage) is best-effort — on
+  // iOS Safari private mode, some in-app webviews, or a full storage quota,
+  // localStorage access throws. That used to throw *before* the gate was
+  // hidden, so a perfectly successful sign-in still left the screen frozen
+  // on "Signing in…". Flip the screen over first, then persist.
   document.body.classList.remove("landing-page");
   $("#gate").style.display = "none";
   $("#landing").classList.remove("on");
   $("#app").classList.add("on");
   $("#roomName").textContent = code;
+  $("#enter").disabled = false;
 
+  try { localStorage.wtName = name; } catch {}
   rememberRoom(code, {
     name,
     ...(R.pendingSource?.episodeId ? { episodeId: R.pendingSource.episodeId } : {}),
