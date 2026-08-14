@@ -14,37 +14,11 @@ export const config = {
   runtime: "nodejs",
 };
 
-const MAX_REDIRECTS = 5;
-
-function isPrivateHost(hostname) {
-  const h = hostname.toLowerCase();
-  return (
-    /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)/i.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-    /^::ffff:(127\.|10\.|192\.168\.|169\.254\.)/i.test(h)
-  );
-}
-
-/* Same issue as web/api/subtitle.js: fetch's redirect:"follow" only checks
- * the URL we were handed, not any URL a hop redirects to afterwards. Walk
- * the chain ourselves and re-run the private/local guard at every step. */
-async function safeFetch(url, options) {
-  let current = url;
-  for (let i = 0; i <= MAX_REDIRECTS; i++) {
-    let parsed;
-    try { parsed = new URL(current); } catch { throw new Error("Bad URL"); }
-    if (isPrivateHost(parsed.hostname)) throw new Error("Refused: private/local target");
-    const res = await fetch(current, { ...options, redirect: "manual" });
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const loc = res.headers.get("location");
-      if (!loc) throw new Error("Redirect with no Location header.");
-      current = new URL(loc, current).href;
-      continue;
-    }
-    return res;
-  }
-  throw new Error("Too many redirects.");
-}
+/* isPrivateHost used to be a plain string pattern-match here, which stops a
+ * literal "http://169.254.169.254/..." but not a hostname whose DNS record
+ * simply resolves to that address (rebinding). safeFetch now resolves and
+ * checks the real IP at every redirect hop — see api/_security.js. */
+import { safeFetch } from "./_security.js";
 
 export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin", "*");
