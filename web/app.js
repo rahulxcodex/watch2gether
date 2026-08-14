@@ -1501,6 +1501,13 @@ async function openLibraryDetail(series) {
       }
     };
   }
+  const shareBtn = $("#libraryDetailShare");
+  if (shareBtn) {
+    // Only makes sense once you're in a room — nowhere shared to put it
+    // otherwise.
+    shareBtn.hidden = !R.room;
+    shareBtn.onclick = () => shareLibraryTitleToRoom(series);
+  }
 
   const meta = [];
   const rating = art?.rating ?? series.imdbRating;
@@ -2243,6 +2250,7 @@ async function join() {
   restoreLook();
   wireRoom();
   wireShelf();
+  wireSharedLibrary();
   if (CFG.API) { $("#addBtn").hidden = false; loadLibrary(); }
 
   const pending = R.pendingSource;
@@ -2886,6 +2894,29 @@ $("#saveBtn").onclick = async () => {
 };
 
 function drawLists() {
+  const shBox = $("#sharedLibList");
+  shBox.innerHTML = "";
+  for (const e of SHARED_LIB) {
+    const card = document.createElement("button");
+    card.className = "title-card";
+    card.type = "button";
+    const count = (e.episodes || []).length;
+    card.innerHTML =
+      `<span class="thumb"></span>` +
+      `<span class="meta"><span class="nm">${esc(e.name)}</span>` +
+      `<span class="host">${e.mediaType === "movie" ? "Movie" : `${count} episode${count === 1 ? "" : "s"}`} · shared by ${esc(e.sharedBy || "someone")}</span></span>` +
+      `<span class="kill" title="Remove from room">&times;</span>`;
+    card.onclick = (ev) => {
+      if (ev.target.classList.contains("kill")) {
+        ev.stopPropagation();
+        return void remove(ref(db, `rooms/${R.room}/sharedLibrary/${e.id}`));
+      }
+      importSharedLibraryTitle(e);
+    };
+    shBox.appendChild(card);
+  }
+  $("#sharedLibSect").hidden = !SHARED_LIB.length;
+
   const box = $("#shelfList");
   box.innerHTML = "";
   for (const e of SHELF) {
@@ -2908,8 +2939,118 @@ function drawLists() {
     box.appendChild(card);
   }
   $("#shelfSect").hidden = !SHELF.length;
-  $("#listEmpty").hidden = !!(SHELF.length || LIB.length);
+  $("#listEmpty").hidden = !!(SHELF.length || LIB.length || SHARED_LIB.length);
   markLib();
+}
+
+/* ------------------------------------------------------------ shared library
+ * The shelf (above) saves one link at a time — whatever's currently playing.
+ * This saves a whole library title — a movie or every episode of a series,
+ * with its IMDb id, summary and season/episode numbers — so the other person
+ * can pull the entire thing into their own library in one click instead of
+ * re-adding it episode by episode. Lives at the same room path family as the
+ * shelf, one node per shared title. */
+
+let SHARED_LIB = [];
+
+function wireSharedLibrary() {
+  onValue(ref(db, `rooms/${R.room}/sharedLibrary`), (s) => {
+    const val = s.val() || {};
+    SHARED_LIB = Object.entries(val).map(([id, e]) => ({ id, ...e }))
+      .sort((a, b) => (b.at || 0) - (a.at || 0));
+    drawLists();
+  });
+}
+
+/* Subtitle text can run up to 1.5MB per episode — fine for one saved link,
+   not fine multiplied across a whole season into a single database write.
+   Only the reference (a fetchable URL, or just the filename as a note) goes
+   into the shared payload; the recipient re-fetches or re-adds the actual
+   text on their side. Everything else about an episode is small and comes
+   along as-is. */
+function shareableEpisode(ep) {
+  return {
+    title: ep.title || "", url: ep.url || "",
+    mediaType: ep.mediaType || "episode",
+    seasonNumber: ep.seasonNumber ?? null, episodeNumber: ep.episodeNumber ?? null,
+    episodeCode: ep.episodeCode || "",
+    episodeImdbId: ep.episodeImdbId || null, episodeSummary: ep.episodeSummary || "",
+    subtitleUrl: ep.subtitleUrl || "",
+    subtitleFileName: ep.subtitleFileName || "",
+    hadEmbeddedSubtitle: !!(ep.subtitleText && !ep.subtitleUrl),
+    subtitleLanguage: ep.subtitleLanguage || "",
+  };
+}
+
+async function shareLibraryTitleToRoom(series) {
+  if (!R.room) return;
+  if (!series?.episodes?.length) return say("Nothing to share yet — add an episode first.");
+  const ok = await ask({
+    title: `Share "${series.name}" to the room?`,
+    body: `Everyone in ${R.room} will be able to add all ${series.episodes.length} saved link${series.episodes.length === 1 ? "" : "s"} to their own library. Locally-uploaded subtitle files aren't included — only subtitle URLs are, since the file itself only lives in your browser.`,
+    input: false, ok: "Share",
+  });
+  if (!ok) return;
+
+  const payload = {
+    name: series.name, mediaType: mediaTypeOf(series), year: series.year ?? null,
+    imdbId: series.imdbId || "", imdbUrl: series.imdbUrl || "",
+    imdbRating: series.imdbRating ?? null, genres: series.genres || [],
+    summary: series.summary || "", sharedBy: R.name || "someone",
+    episodes: series.episodes.map(shareableEpisode).slice(0, 500),
+    at: serverTimestamp(),
+  };
+  await push(ref(db, `rooms/${R.room}/sharedLibrary`), payload)
+    .catch((e) => say("Couldn't share: " + e.message));
+  say(`Shared "${series.name}" to the room`);
+}
+
+/* Pulls a shared title into MY_LIBRARY, the same way addLibraryEpisode()
+   would have built it by hand. Merges into an existing entry with the same
+   IMDb id (or name) rather than creating a duplicate series. */
+function importSharedLibraryTitle(entry) {
+  let series = (entry.imdbId && MY_LIBRARY.find((x) => x.imdbId?.toLowerCase() === entry.imdbId.toLowerCase()))
+    || findSeries(entry.name || "");
+  if (!series) {
+    series = {
+      id: makeId("series"), name: (entry.name || "Untitled").slice(0, 120),
+      mediaType: entry.mediaType === "movie" ? "movie" : "series", episodes: [],
+      year: entry.year ?? null, imdbId: entry.imdbId || "", imdbUrl: entry.imdbUrl || "",
+      imdbRating: entry.imdbRating ?? null, genres: entry.genres || [],
+      summary: entry.summary || "", addedAt: Date.now(),
+    };
+    MY_LIBRARY.unshift(series);
+  }
+
+  let added = 0, updated = 0;
+  for (const ep of entry.episodes || []) {
+    if (!ep.url) continue;
+    const isMovie = ep.mediaType === "movie";
+    const existing = isMovie
+      ? series.episodes.find((e) => mediaTypeOf(series, e) === "movie")
+      : series.episodes.find((e) => e.seasonNumber === ep.seasonNumber && e.episodeNumber === ep.episodeNumber);
+    const patch = {
+      url: ep.url, mediaType: ep.mediaType || "episode",
+      title: ep.title || "", seasonNumber: ep.seasonNumber ?? null, episodeNumber: ep.episodeNumber ?? null,
+      episodeCode: ep.episodeCode || "", seriesImdbId: entry.imdbId || "",
+      episodeImdbId: ep.episodeImdbId || null, episodeSummary: ep.episodeSummary || "",
+      metadataConfidence: "shared", metadataNotes: `Imported from ${entry.sharedBy || "a shared library"}.`,
+      subtitleUrl: ep.subtitleUrl || "", subtitleFileName: ep.subtitleFileName || "",
+      subtitleText: "", subtitleLanguage: ep.subtitleLanguage || "",
+      subtitleSource: ep.subtitleUrl || "", updatedAt: Date.now(),
+    };
+    if (existing) { Object.assign(existing, patch); updated++; }
+    else { series.episodes.push({ id: makeId("ep"), ...patch, addedAt: Date.now() }); added++; }
+  }
+  series.episodes.sort((a, b) => {
+    const sa = Number.isInteger(a.seasonNumber) ? a.seasonNumber : 9999;
+    const sb = Number.isInteger(b.seasonNumber) ? b.seasonNumber : 9999;
+    const ea = Number.isInteger(a.episodeNumber) ? a.episodeNumber : 9999;
+    const eb = Number.isInteger(b.episodeNumber) ? b.episodeNumber : 9999;
+    return sa - sb || ea - eb || (a.addedAt || 0) - (b.addedAt || 0);
+  });
+  writeLibrary();
+  say(`Added "${series.name}" — ${added} new, ${updated} updated`);
 }
 
 function hostOf(u) {
@@ -4083,7 +4224,7 @@ async function loadLibrary() {
   }
   pane.innerHTML = "";
   $("#libSect").hidden = !LIB.length;
-  $("#listEmpty").hidden = !!(SHELF.length || LIB.length);
+  $("#listEmpty").hidden = !!(SHELF.length || LIB.length || SHARED_LIB.length);
   if (!LIB.length) return;
   for (const t of LIB) {
     const card = document.createElement("button");
