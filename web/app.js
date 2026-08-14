@@ -1154,14 +1154,21 @@ function renderNetflixCard(series) {
 
   const poster = posterUrl(art);
   if (poster) {
+    const skeleton = document.createElement("div");
+    skeleton.className = "netflix-card-skeleton";
     const img = document.createElement("img");
     img.src = poster;
     img.alt = series.name || type;
     img.loading = "lazy";
+    img.addEventListener("load", () => {
+      img.classList.add("loaded");
+      skeleton.remove();
+    }, { once: true });
     img.addEventListener("error", () => {
+      skeleton.remove();
       img.replaceWith(makePosterFallback(series.name || type));
     }, { once: true });
-    card.appendChild(img);
+    card.append(skeleton, img);
   } else {
     card.appendChild(makePosterFallback(series.name || type));
   }
