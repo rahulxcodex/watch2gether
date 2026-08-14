@@ -2701,6 +2701,20 @@ function sync() {
 const hardSync = () => { if (PL.dur()) PL.seek(expectedPos()); };
 $("#resync").onclick = () => { hardSync(); say("Snapped to the room"); };
 
+/* A hidden tab has its setInterval throttled by the browser (often to once a
+   minute), so sync() can go stale for a long stretch while someone's on
+   another tab. Coming back to a huge, real drift shouldn't be slow-walked
+   through the cooldown/hysteresis meant for ordinary network noise — that
+   machinery is for distinguishing a blip from a real gap, and a tab that was
+   hidden for a while is unambiguously a real gap. Force an immediate, direct
+   resync the moment the tab is visible again. */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  lastSeekAt = 0;
+  hardStreak = 0;
+  sync();
+});
+
 /* Position heartbeat: drives the other person's drift ribbon, and is what the
    bookmark is written from. */
 let beat = 0;
