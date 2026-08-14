@@ -1,11 +1,17 @@
 /**
- * Groq-powered anime library metadata (free tier).
+ * Anime library metadata, split across two free-tier providers so a single
+ * provider's per-minute token cap doesn't stall the whole pipeline.
  *
  * POST /api/identify
  * Body: { series: string, url: string }
  *
- * Groq handles metadata/web research only. Subtitle files are supplied by
- * the user through the library UI and are never searched for by Groq.
+ * Step 1 (research/web search): Groq `groq/compound`.
+ * Step 2 (structured JSON):      OpenRouter `openai/gpt-oss-20b:free`.
+ *
+ * These are two separate free tiers with separate quotas, so load is spread
+ * across providers instead of hammering Groq's 30k TPM cap twice per request.
+ * Subtitle files are supplied by the user through the library UI and are
+ * never searched for by either model.
  */
 export const config = { runtime: "nodejs" };
 
@@ -29,6 +35,29 @@ function extractText(response) {
   return response?.choices?.[0]?.message?.content || "";
 }
 
+function parseRetryAfterSeconds(text) {
+  const m = /try again in ([\d.]+)s/i.exec(text || "");
+  return m ? Math.min(Math.ceil(parseFloat(m[1])) + 1, 20) : 5;
+}
+
+// Free-tier chat completion endpoints can burst past their per-minute
+// token/request caps. That's transient, not exhaustion, so retry a couple
+// of times with the wait time the provider itself reports before giving up.
+async function fetchWithRetry(base, headers, body, attempts = 3) {
+  let lastRaw = "", lastStatus = 0;
+  for (let i = 0; i < attempts; i++) {
+    const r = await fetch(base, { method: "POST", headers, body: JSON.stringify(body) });
+    const raw = await r.text();
+    if (r.ok) return { ok: true, raw };
+    lastRaw = raw;
+    lastStatus = r.status;
+    if (r.status !== 429 || i === attempts - 1) break;
+    const waitSec = parseRetryAfterSeconds(raw);
+    await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
+  }
+  return { ok: false, raw: lastRaw, status: lastStatus };
+}
+
 export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("access-control-allow-methods", "POST,OPTIONS");
@@ -38,10 +67,16 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
+  const groqKey = process.env.GROQ_API_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  if (!groqKey) {
     return res.status(500).json({
       error: "GROQ_API_KEY is not configured in Vercel environment variables."
+    });
+  }
+  if (!openrouterKey) {
+    return res.status(500).json({
+      error: "OPENROUTER_API_KEY is not configured in Vercel environment variables."
     });
   }
 
@@ -134,36 +169,32 @@ Playlist text (may be empty):
 ${playlistHint}`;
 
   // groq/compound has built-in web search but doesn't support strict JSON
-  // schema output, and the structured-output models don't have web search.
-  // So this runs in two small free-tier calls:
-  // 1) groq/compound does the grounded research as free-form text, then
-  // 2) openai/gpt-oss-120b turns that research into the strict JSON shape
-  //    the UI expects.
-  const base = "https://api.groq.com/openai/v1/chat/completions";
-  const headers = {
+  // schema output. So this runs across two different free tiers:
+  // 1) Groq's groq/compound does the grounded research as free-form text,
+  // 2) OpenRouter's openai/gpt-oss-20b:free turns that research into the
+  //    strict JSON shape the UI expects.
+  // Splitting the two calls across providers means neither one's per-minute
+  // cap has to absorb both requests.
+  const groqBase = "https://api.groq.com/openai/v1/chat/completions";
+  const groqHeaders = {
     "content-type": "application/json",
-    authorization: `Bearer ${apiKey}`,
+    authorization: `Bearer ${groqKey}`,
   };
 
   let research;
   try {
-    const r = await fetch(base, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: "groq/compound",
-        messages: [{ role: "user", content: prompt }],
-      }),
+    const result = await fetchWithRetry(groqBase, groqHeaders, {
+      model: "groq/compound",
+      messages: [{ role: "user", content: prompt }],
     });
-    const raw = await r.text();
-    if (!r.ok) {
+    if (!result.ok) {
       return res.status(502).json({
-        error: `Groq returned HTTP ${r.status}`,
-        detail: raw.slice(0, 1200),
+        error: `Groq returned HTTP ${result.status}`,
+        detail: result.raw.slice(0, 1200),
       });
     }
     let parsed;
-    try { parsed = JSON.parse(raw); }
+    try { parsed = JSON.parse(result.raw); }
     catch { return res.status(502).json({ error: "Groq returned invalid JSON." }); }
     research = extractText(parsed);
   } catch (e) {
@@ -172,49 +203,54 @@ ${playlistHint}`;
   if (!research) return res.status(502).json({ error: "Groq returned no research result." });
   research = research.slice(0, 6000);
 
-  let upstream;
-  try {
-    upstream = await fetch(base, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
-        messages: [{
-          role: "user",
-          content: `Convert the following research notes into the required structured fields. Use null where information is not confidently known.\n\nResearch notes:\n${research}`
-        }],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "anime_library_metadata",
-            schema,
-            strict: true,
-          },
-        },
-      }),
-    });
-  } catch (e) {
-    return res.status(502).json({ error: `Groq request failed: ${e?.message || e}` });
-  }
-
-  const raw = await upstream.text();
-  if (!upstream.ok) {
-    return res.status(502).json({
-      error: `Groq returned HTTP ${upstream.status}`,
-      detail: raw.slice(0, 1200),
-    });
-  }
+  // openai/gpt-oss-20b:free is the smallest/cheapest OpenRouter free model
+  // that still supports strict json_schema structured outputs, so this
+  // formatting step burns the fewest tokens against OpenRouter's daily
+  // free-tier request cap.
+  const openrouterBase = "https://openrouter.ai/api/v1/chat/completions";
+  const openrouterHeaders = {
+    "content-type": "application/json",
+    authorization: `Bearer ${openrouterKey}`,
+    // Optional but recommended by OpenRouter for free-tier attribution.
+    "HTTP-Referer": "https://watch2gether-lilac.vercel.app",
+    "X-Title": "Parallel Watch Library",
+  };
 
   let response;
-  try { response = JSON.parse(raw); }
-  catch { return res.status(502).json({ error: "Groq returned invalid JSON." }); }
+  try {
+    const result = await fetchWithRetry(openrouterBase, openrouterHeaders, {
+      model: "openai/gpt-oss-20b:free",
+      messages: [{
+        role: "user",
+        content: `Convert the following research notes into the required structured fields. Use null where information is not confidently known.\n\nResearch notes:\n${research}`
+      }],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "anime_library_metadata",
+          schema,
+          strict: true,
+        },
+      },
+    });
+    if (!result.ok) {
+      return res.status(502).json({
+        error: `OpenRouter returned HTTP ${result.status}`,
+        detail: result.raw.slice(0, 1200),
+      });
+    }
+    try { response = JSON.parse(result.raw); }
+    catch { return res.status(502).json({ error: "OpenRouter returned invalid JSON." }); }
+  } catch (e) {
+    return res.status(502).json({ error: `OpenRouter request failed: ${e?.message || e}` });
+  }
 
   const text = extractText(response);
-  if (!text) return res.status(502).json({ error: "Groq returned no structured result." });
+  if (!text) return res.status(502).json({ error: "OpenRouter returned no structured result." });
 
   let data;
   try { data = JSON.parse(text); }
-  catch { return res.status(502).json({ error: "Groq returned non-JSON metadata." }); }
+  catch { return res.status(502).json({ error: "OpenRouter returned non-JSON metadata." }); }
 
   for (const key of ["seriesImdbUrl", "episodeImdbUrl"]) {
     if (data[key] && badUrl(data[key])) data[key] = null;
