@@ -21,15 +21,13 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 const GROK_MODEL = process.env.GROK_MODEL || "grok-4.5";
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "openrouter/auto";
 
-function badUrl(value) {
-  if (!value || typeof value !== "string" || value.length > MAX_URL_LENGTH) return true;
-  if (!/^https?:\/\//i.test(value)) return true;
-  try {
-    const h = new URL(value).hostname.toLowerCase();
-    return /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)$/i.test(h) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(h);
-  } catch { return true; }
-}
+/* badUrl used to pattern-match the hostname *string*, which stops a literal
+ * "http://169.254.169.254/..." but not a hostname whose DNS record simply
+ * resolves to that address (rebinding) — and the playlist-hint fetch below
+ * used plain redirect:"follow" with no re-check at each hop at all. Both now
+ * go through the shared resolver-based guard — see api/_security.js. */
+import { safeFetch, isBadUrl } from "./_security.js";
+const badUrl = (value) => isBadUrl(value, MAX_URL_LENGTH);
 
 function extractGeminiText(response) {
   return (response?.candidates?.[0]?.content?.parts || [])
@@ -191,14 +189,14 @@ export default async function handler(req, res) {
   const url = String(req.body?.url || "").trim();
   const imdbId = String(req.body?.imdbId || "").trim().toLowerCase();
   if (!series && !imdbId) return res.status(400).json({error:"Series name or IMDb ID is required."});
-  if (url && badUrl(url)) return res.status(400).json({error:"A valid public http(s) episode URL is required when a URL is supplied."});
+  if (url && await badUrl(url)) return res.status(400).json({error:"A valid public http(s) episode URL is required when a URL is supplied."});
   if (imdbId && !/^tt\d{7,10}$/i.test(imdbId)) return res.status(400).json({error:"IMDb ID must look like tt1234567."});
 
   const imdb = await fetchCompactImdb(imdbId);
   let playlistHint = "";
   if (url) {
     try {
-      const r = await fetch(url,{headers:{"user-agent":"Mozilla/5.0",accept:"application/vnd.apple.mpegurl,text/plain,*/*"},redirect:"follow"});
+      const r = await safeFetch(url,{headers:{"user-agent":"Mozilla/5.0",accept:"application/vnd.apple.mpegurl,text/plain,*/*"}});
       if (r.ok) playlistHint = (await r.text()).slice(0, 700);
     } catch {}
   }
