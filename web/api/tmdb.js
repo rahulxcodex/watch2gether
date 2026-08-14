@@ -11,7 +11,7 @@ async function fetchJsonWithTimeout(url, options={}, ms=5000){
   finally { clearTimeout(t); }
 }
 function yearOf(x){const d=String(x?.release_date||x?.first_air_date||"");return /^\d{4}/.test(d)?Number(d.slice(0,4)):null;}
-async function tmdb(path,params={}){const u=new URL(TMDB_BASE+path);for(const[k,v]of Object.entries(params)){if(v!==undefined&&v!==null&&v!=="")u.searchParams.set(k,String(v));}const h={accept:"application/json"};if(READ_TOKEN)h.Authorization=`Bearer ${READ_TOKEN}`;else if(API_KEY)u.searchParams.set("api_key",API_KEY);const r=await fetch(u,{headers:h});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.status_message||`TMDB HTTP ${r.status}`);return d;}
+async function tmdb(path,params={}){const u=new URL(TMDB_BASE+path);for(const[k,v]of Object.entries(params)){if(v!==undefined&&v!==null&&v!=="")u.searchParams.set(k,String(v));}if(!READ_TOKEN&&!API_KEY)throw new Error("TMDB credentials are not configured");const h={accept:"application/json"};if(READ_TOKEN)h.Authorization=`Bearer ${READ_TOKEN}`;else u.searchParams.set("api_key",API_KEY);const r=await fetchJsonWithTimeout(u,{headers:h},6500);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.status_message||`TMDB HTTP ${r.status}`);return d;}
 function normalize(x,type){if(!x)return null;return {ok:true,source:"tmdb",tmdbId:x.id||null,mediaType:type,posterPath:x.poster_path||null,backdropPath:x.backdrop_path||null,overview:clean(x.overview,1200),rating:typeof x.vote_average==="number"?x.vote_average:null,voteCount:typeof x.vote_count==="number"?x.vote_count:null,year:yearOf(x),title:clean(x.title||x.name),originalTitle:clean(x.original_title||x.original_name),tagline:clean(x.tagline,220),status:clean(x.status,60),runtime:typeof x.runtime==="number"?x.runtime:null,episodeRunTime:Array.isArray(x.episode_run_time)?x.episode_run_time.slice(0,3):[],genres:Array.isArray(x.genres)?x.genres.slice(0,12).map(g=>({id:g.id,name:clean(g.name,60)})):[],seasons:type==="tv"&&Array.isArray(x.seasons)?x.seasons.map(s=>({id:s.id,seasonNumber:s.season_number,name:clean(s.name,120),overview:clean(s.overview,500),airDate:s.air_date||null,episodeCount:s.episode_count||0,posterPath:s.poster_path||null,rating:typeof s.vote_average==="number"?s.vote_average:null,voteCount:typeof s.vote_count==="number"?s.vote_count:null})):[],externalIds:x.external_ids?{imdbId:x.external_ids.imdb_id||null,tvdbId:x.external_ids.tvdb_id||null}:null,credits:x.credits?{cast:Array.isArray(x.credits.cast)?x.credits.cast.slice(0,12).map(c=>({id:c.id,name:clean(c.name,80),character:clean(c.character,100),profilePath:c.profile_path||null})):[],crew:Array.isArray(x.credits.crew)?x.credits.crew.filter(c=>["Director","Writer","Screenplay","Producer"].includes(c.job)).slice(0,12).map(c=>({id:c.id,name:clean(c.name,80),job:clean(c.job,50),profilePath:c.profile_path||null})):[]}:null};}
 async function imdbFallback(title,imdbId,type){
   const q=clean(title); let rows=[];
@@ -36,14 +36,35 @@ async function jikanFallback(title,type){
     return {ok:true,source:"jikan",mediaType:type,title:clean(pick.title),originalTitle:clean(pick.title_japanese),year:pick.year||null,posterUrl:img,backdropUrl:null,posterPath:null,backdropPath:null,overview:clean(pick.synopsis,1200),rating:typeof pick.score==="number"?pick.score:null,voteCount:typeof pick.scored_by==="number"?pick.scored_by:null,status:clean(pick.status,60),runtime:null,genres:Array.isArray(pick.genres)?pick.genres.map(g=>({id:g.mal_id,name:clean(g.name,60)})):[],seasons:[]};
   }catch{return null;}
 }
+async function anilistFallback(title,type){
+  try{
+    const query=`query ($search:String!){ Page(page:1,perPage:8){ media(search:$search,type:ANIME,sort:[POPULARITY_DESC,SCORE_DESC]){ id idMal title{romaji english native userPreferred} startDate{year} episodes duration description coverImage{extraLarge large medium} bannerImage averageScore popularity genres status format siteUrl } } }`;
+    const r=await fetchJsonWithTimeout("https://graphql.anilist.co",{method:"POST",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({query,variables:{search:clean(title,180)}})},6000);
+    if(!r.ok)return null;
+    const j=await r.json();
+    const rows=Array.isArray(j?.data?.Page?.media)?j.data.Page.media:[];
+    const wanted=String(title||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+    const norm=x=>String(x||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+    const pick=rows.find(x=>[x?.title?.english,x?.title?.romaji,x?.title?.userPreferred,x?.title?.native,...(x?.synonyms||[])].some(v=>norm(v)===wanted))
+      || rows.find(x=>[x?.title?.english,x?.title?.romaji,x?.title?.userPreferred].some(v=>norm(v).includes(wanted)||wanted.includes(norm(v))))
+      || rows[0];
+    if(!pick)return null;
+    const poster=pick.coverImage?.extraLarge||pick.coverImage?.large||pick.coverImage?.medium||null;
+    const year=pick.startDate?.year||null;
+    return {ok:true,source:"anilist",mediaType:type,title:clean(pick.title?.english||pick.title?.romaji||pick.title?.userPreferred||title),originalTitle:clean(pick.title?.native),year,posterUrl:poster,backdropUrl:pick.bannerImage||poster,posterPath:null,backdropPath:null,overview:clean(String(pick.description||"").replace(/<[^>]+>/g," "),1200),rating:typeof pick.averageScore==="number"?pick.averageScore/10:null,voteCount:null,status:clean(pick.status,60),runtime:typeof pick.duration==="number"?pick.duration:null,genres:Array.isArray(pick.genres)?pick.genres.map((name,i)=>({id:i+1,name:clean(name,60)})):[],seasons:[],anilistId:pick.id,malId:pick.idMal||null,siteUrl:pick.siteUrl||null};
+  }catch{return null;}
+}
+
 async function fallback(title,imdbId,type){
-  // Run the two cheap fallbacks concurrently and take the closest match.
-  const [imdb,anime]=await Promise.all([imdbFallback(title,imdbId,type),jikanFallback(title,type)]);
-  if(anime){
-    const a=String(anime.title||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-    const b=String(title||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-    const close=a===b||a.includes(b)||b.includes(a);
-    if(close) return {...imdb,...anime,posterUrl:anime.posterUrl||imdb?.posterUrl||null,source:imdb?.posterUrl?"jikan+imdb":"jikan"};
+  // TMDB is optional. For anime, Jikan/AniList provide reliable artwork without a TMDB key.
+  const [imdb,anime,anilist]=await Promise.all([imdbFallback(title,imdbId,type),jikanFallback(title,type),anilistFallback(title,type)]);
+  const norm=x=>String(x||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  const wanted=norm(title);
+  for(const candidate of [anime,anilist]){
+    if(!candidate) continue;
+    const a=norm(candidate.title);
+    const close=a===wanted||a.includes(wanted)||wanted.includes(a);
+    if(close) return {...imdb,...candidate,posterUrl:candidate.posterUrl||imdb?.posterUrl||null,backdropUrl:candidate.backdropUrl||candidate.posterUrl||null,source:candidate.source};
   }
   return imdb;
 }
@@ -95,12 +116,18 @@ export default async function handler(req,res){
   const action=clean(req.query?.action,30).toLowerCase();
 
   if(action==='anime'){
+    const q=clean(req.query?.title,180);
+    if(!q) return res.status(200).json({ok:true,results:[]});
     try {
-      const q=clean(req.query?.title,180);
-      if(!q) return res.status(200).json({ok:true,results:[]});
       const d=await jikan('anime',{q,limit:8,sfw:'true'});
-      return res.status(200).json({ok:true,results:jikanSearchRows(d).map(jikanSummary)});
-    } catch(e) { return res.status(200).json({ok:false,results:[],error:'Anime metadata unavailable'}); }
+      const rows=jikanSearchRows(d).map(jikanSummary);
+      if(rows.length) return res.status(200).json({ok:true,results:rows,source:'jikan'});
+    } catch(e) {}
+    try {
+      const a=await anilistFallback(q,type);
+      if(a) return res.status(200).json({ok:true,results:[{mal_id:a.malId||null,title:a.title,title_english:a.title,year:a.year,episodes:a.episodes||null,score:a.rating?Number(a.rating)*10:null,scored_by:null,rank:null,popularity:null,members:null,favorites:null,synopsis:a.overview||'',background:'',status:a.status||'',duration:'',url:a.siteUrl||null,images:{jpg:{large_image_url:a.posterUrl,image_url:a.posterUrl}}}],source:'anilist'});
+    } catch(e) {}
+    return res.status(200).json({ok:false,results:[],error:'Anime metadata unavailable'});
   }
   if(action==='anime-full'){
     try { const d=await jikanFull(clean(req.query?.malId,20)); return res.status(200).json({ok:!!d,data:d||null}); }
@@ -119,6 +146,12 @@ export default async function handler(req,res){
       const d=await tmdb(`/tv/${id}/season/${s}`,{language:"en-US"});
       return res.status(200).json({ok:true,source:"tmdb",tmdbId:Number(id),seasonNumber:s,name:clean(d.name),overview:clean(d.overview,700),airDate:d.air_date||null,posterPath:d.poster_path||null,rating:typeof d.vote_average==="number"?d.vote_average:null,voteCount:typeof d.vote_count==="number"?d.vote_count:null,episodeCount:Array.isArray(d.episodes)?d.episodes.length:0,episodes:Array.isArray(d.episodes)?d.episodes.map(normalizeEpisode):[]});
     }catch{return res.status(200).json({ok:true,source:"fallback",seasonNumber:Number(req.query.season),episodes:[]});}
+  }
+  // TMDB is an optional enrichment provider. If its credentials are absent,
+  // do not make a doomed request; return the free anime/IMDb fallback immediately.
+  if(!READ_TOKEN && !API_KEY){
+    const fb=await fallback(title,imdbId,type);
+    return res.status(200).json(fb || {ok:false,source:"none",error:"Metadata unavailable"});
   }
   try{
     let item=null;
