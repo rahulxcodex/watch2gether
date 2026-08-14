@@ -3818,6 +3818,10 @@ function stopVoice() {
   VOICE.readLocal = null;
   [...VOICE.peers.keys()].forEach(dropPeer);
   pushPresence({ voice: false });
+  // dropPeer above tore down every connection, including receive-only ones
+  // for members still broadcasting — rebuild those immediately rather than
+  // waiting on the presence round-trip through Firebase to do it.
+  syncPeers();
   if (!PL.isMuted()) PL.setVol(LOOK.vol);
   paintMic();
 }
@@ -3845,7 +3849,21 @@ function syncPeers() {
 
 function ensurePeer(uid, mayOffer) {
   let p = VOICE.peers.get(uid);
-  if (p) return p;
+  if (p) {
+    // The mic may have been turned on after this (receive-only) connection
+    // was already created — attach any newly available local tracks and
+    // renegotiate, otherwise audio stays one-way until the peer happens to
+    // get torn down and rebuilt.
+    if (VOICE.stream) {
+      const already = new Set(p.pc.getSenders().map((s) => s.track));
+      let added = false;
+      for (const t of VOICE.stream.getTracks()) {
+        if (!already.has(t)) { p.pc.addTrack(t, VOICE.stream); added = true; }
+      }
+      if (added && R.uid < uid) makeOffer(uid); // same side always offers, avoids glare
+    }
+    return p;
+  }
 
   const pc = new RTCPeerConnection(rtcConfig());
   const el = document.createElement("audio");
