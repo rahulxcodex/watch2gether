@@ -140,7 +140,7 @@ ${playlistHint}`;
   // 1) a grounded research pass (free-form text, web search enabled), then
   // 2) a structuring pass that turns that research into the strict JSON
   //    shape the UI expects (no tools, so responseSchema is honored).
-  const model = "gemini-3.6-flash";
+  const model = "gemini-3.1-flash-lite";
   const base = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   let research;
