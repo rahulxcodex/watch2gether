@@ -496,15 +496,23 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
                 <input class="input" name="imdbId" placeholder="tt1234567" pattern="tt\d{7,10}" maxlength="12" required>
               </label>
               <label class="field">
+                <span class="eyebrow">Season</span>
+                <input class="input" name="seasonNumber" type="number" min="1" max="99" placeholder="1" required>
+              </label>
+              <label class="field">
                 <span class="eyebrow">Episode</span>
-                <input class="input" name="episode" placeholder="S01E01 · Cruelty" maxlength="120">
+                <input class="input" name="episodeNumber" type="number" min="1" max="999" placeholder="1" required>
+              </label>
+              <label class="field full">
+                <span class="eyebrow">Episode title <small>(optional)</small></span>
+                <input class="input" name="episode" placeholder="Cruelty" maxlength="120">
               </label>
               <label class="field full">
                 <span class="eyebrow">Episode link</span>
                 <input class="input" name="url" placeholder="https://.../playlist.m3u8" autocapitalize="off" spellcheck="false" required>
               </label>
               <label class="field full">
-                <span class="eyebrow">English subtitle URL <small>(optional)</small></span>
+                <span class="eyebrow">English subtitle URL <small>(optional — leave blank to auto-download)</small></span>
                 <input class="input" name="subtitleUrl" placeholder="https://.../english.srt" autocapitalize="off" spellcheck="false">
               </label>
               <label class="field full">
@@ -512,8 +520,8 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radiu
                 <input class="input" name="subtitleFile" type="file" accept=".srt,.vtt,.ass,.ssa,text/vtt,application/x-subrip">
               </label>
               <div class="landing-ai-note full">
-                <b>IMDb is the identity key</b>
-                <span>Use the IMDb ID for the series/movie. Parallel uses it to map the video link and imported subtitles to the right title, season and episode.</span>
+                <b>Subtitles download automatically</b>
+                <span>Since you already entered the season and episode number, Parallel pulls the best matching English subtitle for that exact episode straight from OpenSubtitles — no separate lookup step. If none is found, you'll be asked whether to upload a file by hand instead.</span>
               </div>
             </div>
             <div class="row">
