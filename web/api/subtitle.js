@@ -16,49 +16,13 @@ const MAX_URL_LENGTH = 4096;
 // 1.5MB and 2MB would pass this endpoint and then get silently rejected by
 // the Firebase write with no error shown to the user.
 const MAX_SUBTITLE_BYTES = 1500000;
-const MAX_REDIRECTS = 5;
 
-function isPrivateHost(hostname) {
-  const h = hostname.toLowerCase();
-  return (
-    /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)$/i.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-    /^::ffff:(127\.|10\.|192\.168\.|169\.254\.)/i.test(h)
-  );
-}
-
-function badUrl(value) {
-  if (!value || typeof value !== "string" || value.length > MAX_URL_LENGTH) return true;
-  if (!/^https?:\/\//i.test(value)) return true;
-  try {
-    return isPrivateHost(new URL(value).hostname);
-  } catch {
-    return true;
-  }
-}
-
-/* fetch() with redirect: "follow" only checks the *first* URL against the
- * private-host guard — a remote server can then 302 to
- * http://169.254.169.254/... (cloud metadata) or any other internal address
- * and the follower goes there anyway. Walk the redirect chain by hand and
- * re-run the guard at every hop instead. */
-async function safeFetch(url, options) {
-  let current = url;
-  for (let i = 0; i <= MAX_REDIRECTS; i++) {
-    if (badUrl(current)) {
-      throw new Error("Refused: redirected to a disallowed or private URL.");
-    }
-    const res = await fetch(current, { ...options, redirect: "manual" });
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const loc = res.headers.get("location");
-      if (!loc) throw new Error("Redirect with no Location header.");
-      current = new URL(loc, current).href;
-      continue;
-    }
-    return res;
-  }
-  throw new Error("Too many redirects.");
-}
+/* badUrl/safeFetch used to pattern-match the hostname *string*, which stops
+ * a literal "http://169.254.169.254/..." but not a hostname whose DNS
+ * record simply resolves to that address (rebinding). Both now resolve and
+ * check the real IP, at every redirect hop — see api/_security.js. */
+import { safeFetch, isBadUrl } from "./_security.js";
+const badUrl = (value) => isBadUrl(value, MAX_URL_LENGTH);
 
 export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin", "*");
@@ -70,7 +34,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const url = String(req.body?.url || "").trim();
-  if (badUrl(url)) {
+  if (await badUrl(url)) {
     return res.status(400).json({ error: "Enter a valid public http(s) subtitle URL." });
   }
 
