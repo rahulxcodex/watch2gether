@@ -62,7 +62,9 @@ export default async function handler(req, res) {
       },
       redirect: "follow",
     });
-    if (r.ok) playlistHint = (await r.text()).slice(0, 12000);
+    // Kept small: Groq's free tier has a low tokens-per-minute ceiling, and
+    // large request bodies get rejected with a 413 as a result.
+    if (r.ok) playlistHint = (await r.text()).slice(0, 1500);
   } catch {}
 
   // JSON Schema for Groq's OpenAI-compatible strict structured-output mode.
@@ -168,6 +170,7 @@ ${playlistHint}`;
     return res.status(502).json({ error: `Groq request failed: ${e?.message || e}` });
   }
   if (!research) return res.status(502).json({ error: "Groq returned no research result." });
+  research = research.slice(0, 6000);
 
   let upstream;
   try {
