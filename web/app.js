@@ -188,6 +188,9 @@ function openRoom(code) {
 
 async function watchLibraryEpisode(series, ep) {
   let episodeUrl = String(ep.url || "").trim();
+  if (!episodeUrl) {
+    return say(`${ep.episodeCode || ep.title} has subtitles saved, but no video link yet. Add the episode link first.`);
+  }
 
   // Older library entries created before URL persistence may not have ep.url.
   // Offer a one-time repair instead of sending undefined to Firebase.
@@ -237,10 +240,12 @@ async function addLibraryEpisode(form) {
   const seriesName = String(fd.get("series") || "").trim();
   const episodeOverride = String(fd.get("episode") || "").trim();
   const url = String(fd.get("url") || "").trim();
+  const imdbId = String(fd.get("imdbId") || "").trim().toLowerCase();
   const subtitleUrl = String(fd.get("subtitleUrl") || "").trim();
   const subtitleFile = fd.get("subtitleFile");
 
   if (!seriesName) return say("Enter a series name.");
+  if (!/^tt\d{7,10}$/i.test(imdbId)) return say("Enter a valid IMDb ID such as tt1234567.");
   if (!url || !/^https?:\/\//i.test(url)) return say("Enter a valid http(s) episode URL.");
   if (!parseSource(url)) return say("That doesn't look like a playable video or HLS URL.");
   if (subtitleUrl && !/^https?:\/\//i.test(subtitleUrl)) return say("Subtitle URL must start with http:// or https://.");
@@ -287,7 +292,7 @@ async function addLibraryEpisode(form) {
       const r = await fetch("/api/identify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ series: seriesName, url }),
+        body: JSON.stringify({ series: seriesName, url, imdbId }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || `Metadata service returned ${r.status}`);
@@ -300,7 +305,7 @@ async function addLibraryEpisode(form) {
         episodeImdbId: null, episodeImdbUrl: null, episodeImdbRating: null,
         episodeSummary: "", metadataNotes: String(e.message || e),
       };
-      say("Gemini lookup failed — saving the episode with your supplied details.");
+      say("Metadata lookup failed — saving with your supplied details. The app will try Gemini → Grok → OpenRouter automatically when configured.");
     }
 
     const resolvedSeries = String(meta.series || seriesName).trim() || seriesName;
@@ -312,12 +317,12 @@ async function addLibraryEpisode(form) {
       [generatedCode, String(meta.episodeTitle || "").trim()].filter(Boolean).join(" · ") ||
       `Episode ${((findSeries(resolvedSeries)?.episodes.length || 0) + 1)}`;
 
-    let series = findSeries(resolvedSeries);
+    let series = MY_LIBRARY.find((x) => x.imdbId && x.imdbId.toLowerCase() === imdbId) || findSeries(resolvedSeries);
     if (!series) {
       series = {
         id: makeId("series"), name: resolvedSeries.slice(0, 120), episodes: [],
         year: Number.isInteger(meta.seriesYear) ? meta.seriesYear : null,
-        imdbId: meta.seriesImdbId || null, imdbUrl: meta.seriesImdbUrl || null,
+        imdbId, imdbUrl: meta.seriesImdbUrl || `https://www.imdb.com/title/${imdbId}/`,
         imdbRating: typeof meta.seriesImdbRating === "number" ? meta.seriesImdbRating : null,
         genres: Array.isArray(meta.seriesGenres) ? meta.seriesGenres.slice(0, 10) : [],
         summary: String(meta.seriesSummary || "").slice(0, 1200), addedAt: Date.now(),
@@ -326,18 +331,22 @@ async function addLibraryEpisode(form) {
     } else {
       Object.assign(series, {
         year: Number.isInteger(meta.seriesYear) ? meta.seriesYear : (series.year ?? null),
-        imdbId: meta.seriesImdbId || series.imdbId || null,
-        imdbUrl: meta.seriesImdbUrl || series.imdbUrl || null,
+        imdbId: series.imdbId || imdbId,
+        imdbUrl: meta.seriesImdbUrl || series.imdbUrl || `https://www.imdb.com/title/${imdbId}/`,
         imdbRating: typeof meta.seriesImdbRating === "number" ? meta.seriesImdbRating : (series.imdbRating ?? null),
         genres: Array.isArray(meta.seriesGenres) && meta.seriesGenres.length ? meta.seriesGenres.slice(0, 10) : (series.genres || []),
         summary: String(meta.seriesSummary || series.summary || "").slice(0, 1200),
       });
     }
 
-    const duplicate = series.episodes.find((e) => e.url === url);
+    const duplicate = series.episodes.find((e) => e.url === url) ||
+      (season != null && epNo != null
+        ? series.episodes.find((e) => !e.url && e.seasonNumber === season && e.episodeNumber === epNo)
+        : null);
     const episodePatch = {
       url,
       title, seasonNumber: season, episodeNumber: epNo, episodeCode: generatedCode,
+      seriesImdbId: imdbId,
       episodeImdbId: meta.episodeImdbId || null, episodeImdbUrl: meta.episodeImdbUrl || null,
       episodeImdbRating: typeof meta.episodeImdbRating === "number" ? meta.episodeImdbRating : null,
       episodeSummary: String(meta.episodeSummary || "").slice(0, 1200),
@@ -374,6 +383,116 @@ async function addLibraryEpisode(form) {
     say(subtitleText ? `${series.name} — ${ep.title} · English subtitles saved` : `${series.name} — ${ep.title} · added`);
   } finally {
     if (submit) { submit.disabled = false; submit.textContent = oldText || "Analyze & add"; }
+  }
+}
+
+
+async function importOpenSubtitles(form) {
+  const fd = new FormData(form);
+  const url = String(fd.get("url") || "").trim();
+  const imdbId = String(fd.get("imdbId") || "").trim().toLowerCase();
+  if (!/^https?:\/\/(?:www\.)?opensubtitles\.org\//i.test(url)) {
+    return say("Paste an OpenSubtitles.org search page URL.");
+  }
+  if (!/^tt\d{7,10}$/i.test(imdbId)) return say("Enter a valid IMDb ID such as tt1234567.");
+
+  const submit = form.querySelector('button[type="submit"]');
+  const oldText = submit?.textContent;
+  if (submit) { submit.disabled = true; submit.textContent = "Downloading subtitles…"; }
+
+  try {
+    const r = await fetch("/api/opensubs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url, imdbId }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) return say(body.error || "OpenSubtitles import failed.");
+    if (!Array.isArray(body.files) || !body.files.length) return say("No usable subtitles were found.");
+
+    if (submit) submit.textContent = "Mapping IMDb…";
+    let meta = null;
+    try {
+      const mr = await fetch("/api/identify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ imdbId }),
+      });
+      if (mr.ok) meta = await mr.json();
+    } catch {}
+
+    const resolvedSeries = String(meta?.series || "IMDb " + imdbId).trim();
+    let series = MY_LIBRARY.find((x) => x.imdbId && x.imdbId.toLowerCase() === imdbId) || findSeries(resolvedSeries);
+    if (!series) {
+      series = {
+        id: makeId("series"), name: resolvedSeries.slice(0, 120), episodes: [],
+        year: Number.isInteger(meta?.seriesYear) ? meta.seriesYear : null,
+        imdbId, imdbUrl: meta?.seriesImdbUrl || `https://www.imdb.com/title/${imdbId}/`,
+        imdbRating: typeof meta?.seriesImdbRating === "number" ? meta.seriesImdbRating : null,
+        genres: Array.isArray(meta?.seriesGenres) ? meta.seriesGenres.slice(0, 10) : [],
+        summary: String(meta?.seriesSummary || "").slice(0, 1200), addedAt: Date.now(),
+      };
+      MY_LIBRARY.unshift(series);
+    } else {
+      Object.assign(series, {
+        imdbId: series.imdbId || imdbId,
+        imdbUrl: meta?.seriesImdbUrl || series.imdbUrl || `https://www.imdb.com/title/${imdbId}/`,
+        year: Number.isInteger(meta?.seriesYear) ? meta.seriesYear : (series.year ?? null),
+        imdbRating: typeof meta?.seriesImdbRating === "number" ? meta.seriesImdbRating : (series.imdbRating ?? null),
+        genres: Array.isArray(meta?.seriesGenres) && meta.seriesGenres.length ? meta.seriesGenres.slice(0, 10) : (series.genres || []),
+        summary: String(meta?.seriesSummary || series.summary || "").slice(0, 1200),
+      });
+    }
+
+    let created = 0, updated = 0;
+    for (const file of body.files) {
+      const season = Number.isInteger(file.season) ? file.season : null;
+      const epNo = Number.isInteger(file.episode) ? file.episode : null;
+      const code = String(file.code || (season != null && epNo != null
+        ? `S${String(season).padStart(2, "0")}E${String(epNo).padStart(2, "0")}` : "")).trim();
+      const existing = season != null && epNo != null
+        ? series.episodes.find((e) => e.seasonNumber === season && e.episodeNumber === epNo)
+        : series.episodes.find((e) => e.subtitleSource === "OpenSubtitles" && e.seasonNumber == null && e.episodeNumber == null);
+
+      const title = existing?.title || (code ? `${code} · ${file.fileName.replace(/\.[^.]+$/, "")}` : file.fileName.replace(/\.[^.]+$/, "Movie"));
+      const patch = {
+        url: existing?.url || "",
+        title,
+        seasonNumber: season,
+        episodeNumber: epNo,
+        episodeCode: code,
+        subtitleText: String(file.text || ""),
+        subtitleFileName: String(file.fileName || "subtitle.ass").slice(-180),
+        subtitleLanguage: "English",
+        subtitleSource: "OpenSubtitles",
+        metadataConfidence: "high",
+        metadataNotes: `Imported from OpenSubtitles subtitle ${file.id}.`,
+        updatedAt: Date.now(),
+      };
+
+      if (existing) {
+        Object.assign(existing, patch);
+        updated++;
+      } else {
+        series.episodes.push({ id: makeId("ep"), ...patch, addedAt: Date.now() });
+        created++;
+      }
+    }
+
+    series.episodes.sort((a, b) => {
+      const sa = Number.isInteger(a.seasonNumber) ? a.seasonNumber : 9999;
+      const sb = Number.isInteger(b.seasonNumber) ? b.seasonNumber : 9999;
+      const ea = Number.isInteger(a.episodeNumber) ? a.episodeNumber : 9999;
+      const eb = Number.isInteger(b.episodeNumber) ? b.episodeNumber : 9999;
+      return sa - sb || ea - eb || (a.addedAt || 0) - (b.addedAt || 0);
+    });
+
+    writeLibrary();
+    form.reset();
+    $("#subtitleImportWrap").hidden = true;
+    say(`${series.name}: imported ${body.files.length} subtitle${body.files.length === 1 ? "" : "s"} · ${updated} updated, ${created} created${body.failed ? ` · ${body.failed} downloads failed` : ""}`);
+  } finally {
+    if (submit) { submit.disabled = false; submit.textContent = oldText || "Import subtitles"; }
   }
 }
 
@@ -438,6 +557,7 @@ function renderLanding() {
         const subtitleLabel = ep.subtitleText
           ? `English subtitles saved · ${esc(ep.subtitleFileName || "subtitle")}`
           : "No subtitle saved";
+        const watchLabel = ep.url ? "Watch" : "Add video link";
         const epImdb = ep.episodeImdbUrl
           ? `<a class="imdb-link" href="${esc(ep.episodeImdbUrl)}" target="_blank" rel="noopener">Episode IMDb${ep.episodeImdbRating != null ? ` ${esc(ep.episodeImdbRating)}` : ""}</a>`
           : "";
@@ -451,10 +571,13 @@ function renderLanding() {
             ${ep.episodeSummary ? `<p class="episode-summary">${esc(ep.episodeSummary)}</p>` : ""}
           </div>
           <div class="episode-actions">
-            <button class="btn primary episode-watch" type="button">Watch</button>
+            <button class="btn primary episode-watch" type="button">${watchLabel}</button>
             <button class="episode-delete" type="button" title="Remove episode">×</button>
           </div>`;
-        row.querySelector(".episode-watch").onclick = () => watchLibraryEpisode(series, ep);
+        row.querySelector(".episode-watch").onclick = () => {
+          if (ep.url) watchLibraryEpisode(series, ep);
+          else openLibraryForm(series.name);
+        };
         row.querySelector(".episode-delete").onclick = () => deleteLibraryEpisode(series.id, ep.id);
         list.appendChild(row);
       }
@@ -559,9 +682,14 @@ function syncSeriesFields() {
     field.hidden = true;
     input.required = false;
     input.value = sel.value;
+    const imdb = findSeries(sel.value)?.imdbId || "";
+    const imdbField = $("#libraryForm")?.querySelector('[name="imdbId"]');
+    if (imdbField && imdb) imdbField.value = imdb;
   } else {
     field.hidden = false;
     input.required = true;
+    const imdbField = $("#libraryForm")?.querySelector('[name="imdbId"]');
+    if (imdbField && !findSeries(input.value)?.imdbId) imdbField.value = "";
   }
 }
 
@@ -571,11 +699,27 @@ function openLibraryForm(seriesName) {
   // When opened from a specific series' "+ Add episode" button, that series
   // is already picked and its name field is hidden — so send focus straight
   // to the episode link instead of a hidden input.
-  const target = (seriesName && findSeries(seriesName))
+  const chosenSeries = seriesName ? findSeries(seriesName) : null;
+  const imdbField = $("#libraryForm").querySelector('[name="imdbId"]');
+  if (imdbField) { imdbField.value = chosenSeries?.imdbId || ""; }
+  const target = chosenSeries
     ? $("#libraryForm").querySelector('[name="url"]')
     : $("#librarySeries");
   target?.focus();
 }
+
+$("#landingImportSubsBtn").onclick = () => {
+  $("#subtitleImportWrap").hidden = !$("#subtitleImportWrap").hidden;
+  if (!$("#subtitleImportWrap").hidden) $("#subtitleImportForm").querySelector('[name="url"]')?.focus();
+};
+$("#subtitleImportCancel").onclick = () => {
+  $("#subtitleImportWrap").hidden = true;
+  $("#subtitleImportForm").reset();
+};
+$("#subtitleImportForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  importOpenSubtitles(e.currentTarget);
+});
 
 $("#landingAddBtn").onclick = () => {
   if ($("#libraryFormWrap").hidden) openLibraryForm();
