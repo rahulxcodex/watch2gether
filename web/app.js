@@ -128,6 +128,7 @@ const R = {
   pendingSource: null,
   announcedJoin: false, hadMemberSnapshot: false,
   connected: false, hls: null,
+  currentEpisodeId: null, currentSeriesId: null,
 };
 
 /* ------------------------------------------------------------------ icons */
@@ -232,6 +233,16 @@ const readStore = (key, fallback) => {
 let MY_LIBRARY = readStore(LIBRARY_KEY, []);
 let SAVED_ROOMS = readStore(ROOMS_KEY, []);
 
+/* Per-episode watch progress, independent of any one room. Whichever private
+ * room a library episode happens to be watched in, the position lands here
+ * too — keyed by episode id — so "Continue Watching" on the home page works
+ * regardless of which room code you used last time. */
+const PROGRESS_KEY = "wtProgressV1";
+let WATCH_PROGRESS = readStore(PROGRESS_KEY, {}); // { [episodeId]: {seriesId,pos,dur,updatedAt} }
+function writeProgress() {
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(WATCH_PROGRESS)); } catch {}
+}
+
 function writeLibrary() {
   try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(MY_LIBRARY)); } catch {}
   renderLanding();
@@ -316,7 +327,7 @@ function openRoom(code) {
   }
 }
 
-async function watchLibraryEpisode(series, ep) {
+async function watchLibraryEpisode(series, ep, startAt = 0) {
   let episodeUrl = String(ep.url || "").trim();
 
   // Older library entries created before URL persistence may not have ep.url.
@@ -349,6 +360,8 @@ async function watchLibraryEpisode(series, ep) {
     title: `${series.name} — ${ep.title || parsed.title || "Episode"}`,
     label: "Library",
     episodeId: ep.id,
+    seriesId: series.id,
+    startAt: Number(startAt) || 0,
     subs: ep.subtitleText
       ? [{ key: "local", label: ep.subtitleLanguage || "English" }]
       : (ep.subtitleUrl ? [{ key: ep.subtitleUrl, label: ep.subtitleLanguage || "English" }] : []),
@@ -365,7 +378,7 @@ async function watchLibraryEpisode(series, ep) {
   // splitting anyone else watching along away from you.
   if (R.room) {
     rememberRoom(R.room, { episodeId: ep.id });
-    setSource(source);
+    setSource(source, source.startAt);
     $("#landing").classList.remove("on");
     $("#app").classList.add("on");
     say(`Switched to ${series.name} — ${ep.title || "episode"}`);
@@ -1652,16 +1665,16 @@ function renderDetailEpisode(series, ep, tmdbEp, movie=false) {
   actions.append(watch,edit); copy.appendChild(actions); row.append(art,copy); return row;
 }
 
-function renderNetflixCard(series) {
+function renderNetflixCard(series, opts = {}) {
   const art = tmdbArt(series);
   const type = mediaTypeOf(series) === "movie" ? "Movie" : "Series";
-  const meta = titleMeta(series).filter((x) => x !== type).slice(0, 2).join(" · ");
+  const meta = opts.metaLabel || titleMeta(series).filter((x) => x !== type).slice(0, 2).join(" · ");
   const card = document.createElement("article");
-  card.className = "netflix-card";
+  card.className = "netflix-card" + (opts.extraClass ? ` ${opts.extraClass}` : "");
   card.tabIndex = 0;
   card.setAttribute("role", "button");
   card.dataset.libraryId = String(series.id || "");
-  card.setAttribute("aria-label", `Open ${series.name || type}`);
+  card.setAttribute("aria-label", opts.ariaLabel || `Open ${series.name || type}`);
 
   const poster = posterUrl(art);
   const skeleton = document.createElement("div");
@@ -1716,7 +1729,13 @@ function renderNetflixCard(series) {
   info.className = "netflix-card-info";
   info.innerHTML = `<b>${esc(series.name || "Untitled")}</b><span>${esc(meta || type)}</span>`;
   card.append(shade, info);
-  const open = () => openLibraryDetail(series);
+  if (Number.isFinite(opts.progressPct)) {
+    const prog = document.createElement("div");
+    prog.className = "netflix-progress";
+    prog.innerHTML = `<i style="width:${clamp(opts.progressPct, 1, 100)}%"></i>`;
+    card.appendChild(prog);
+  }
+  const open = opts.onClick || (() => openLibraryDetail(series));
   card.addEventListener("click", (e) => {
     if (card.dataset.dragMoved === "1") { card.dataset.dragMoved = "0"; return; }
     open();
@@ -1732,6 +1751,50 @@ function makePosterFallback(name) {
   el.className = "poster-fallback";
   el.textContent = name;
   return el;
+}
+
+/* --------------------------------------------------- continue watching
+ * Turns a WATCH_PROGRESS entry (episode id + position) back into the
+ * series/episode pair it belongs to, since progress is keyed by id but
+ * rendering needs the actual title, poster art, and episode number. */
+function findLibraryEpisodeById(episodeId) {
+  for (const series of MY_LIBRARY) {
+    const ep = series.episodes?.find((e) => e.id === episodeId);
+    if (ep) return { series, ep };
+  }
+  return null;
+}
+
+function episodeBadge(series, ep) {
+  if (mediaTypeOf(series, ep) === "movie") return "Movie";
+  const s = Number.isInteger(ep.seasonNumber) ? String(ep.seasonNumber).padStart(2, "0") : null;
+  const e = Number.isInteger(ep.episodeNumber) ? String(ep.episodeNumber).padStart(2, "0") : null;
+  if (s && e) return `S${s} E${e}`;
+  if (e) return `E${e}`;
+  return ep.title || "Episode";
+}
+
+function renderContinueCard(episodeId, entry) {
+  const hit = findLibraryEpisodeById(episodeId);
+  if (!hit) return null;
+  const { series, ep } = hit;
+  const pct = entry.dur ? Math.round((entry.pos / entry.dur) * 100) : 0;
+  return renderNetflixCard(series, {
+    metaLabel: `${episodeBadge(series, ep)} · ${clamp(pct, 1, 99)}%`,
+    progressPct: pct,
+    ariaLabel: `Resume ${series.name} — ${episodeBadge(series, ep)}`,
+    onClick: () => watchLibraryEpisode(series, ep, entry.pos),
+  });
+}
+
+function getContinueWatchingEntries(limit = 12) {
+  const out = [];
+  for (const [episodeId, entry] of Object.entries(WATCH_PROGRESS)) {
+    if (!findLibraryEpisodeById(episodeId)) continue; // episode/series was removed since
+    out.push([episodeId, entry]);
+  }
+  out.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+  return out.slice(0, limit);
 }
 
 function setupNetflixRows() {
@@ -1932,12 +1995,21 @@ function renderLanding() {
     $("#libraryHeroInfo").onclick = () => $("#landingAddBtn").click();
   }
 
+  // "Continue Watching" is per-episode progress (poster tile + % complete),
+  // separate from the room-code-based "Saved rooms" list further down —
+  // that one's about reopening a room, this one's about picking up an
+  // episode exactly where you left it, in whichever room that turns out to be.
   const continueSection = $("#continueSection");
   const continueRow = $("#continueRow");
   continueRow.innerHTML = "";
-  if (SAVED_ROOMS.length) {
+  const continueEntries = getContinueWatchingEntries();
+  if (continueEntries.length) {
     continueSection.hidden = false;
-    for (const room of SAVED_ROOMS.slice(0, 10)) continueRow.appendChild(renderRoomCard(room, "Resume"));
+    for (const [episodeId, entry] of continueEntries) {
+      const card = renderContinueCard(episodeId, entry);
+      if (card) continueRow.appendChild(card);
+    }
+    setupNetflixRows();
   } else continueSection.hidden = true;
 
   const rooms = $("#landingRooms");
@@ -2477,7 +2549,7 @@ async function join() {
   const pending = R.pendingSource;
   R.pendingSource = null;
   if (pending) {
-    setTimeout(() => setSource(pending), 250);
+    setTimeout(() => setSource(pending, pending.startAt || 0), 250);
   }
 }
 
@@ -3047,6 +3119,7 @@ setInterval(() => {
   if (!R.state.playing && ++beat % 5) return;
   pushPresence({ pos: PL.time(), dur: PL.dur(), stalled: PL.stalled() });
   saveProgress();
+  saveLibraryProgress();
 }, 1000);
 
 function pushPresence(patch) {
@@ -3067,6 +3140,30 @@ function saveProgress() {
   update(ref(db, `rooms/${R.room}/seen/${id}`), {
     pos: done ? 0 : at, dur, done, title: s.title || "", at: serverTimestamp(),
   }).catch(() => {});
+}
+
+/* Home-page "Continue Watching": progress keyed by library episode id, kept
+ * in localStorage rather than Firebase so it survives across whichever room
+ * code a title happens to be watched in. Separate throttle from saveProgress()
+ * above (room bookmark) so the two don't have to agree on timing. */
+let lastLibSave = 0;
+function saveLibraryProgress() {
+  if (!R.currentEpisodeId || !R.state?.playing) return;
+  const dur = PL.dur(), at = PL.time();
+  if (!dur || at < 20) return; // a few seconds of skimming shouldn't create a tile
+  if (Date.now() - lastLibSave < 15000) return;
+  lastLibSave = Date.now();
+  // The last ninety seconds count as finished, same cutoff as the room
+  // bookmark above — drop the tile rather than offer to "resume" the credits.
+  if (at > dur - 90) {
+    if (WATCH_PROGRESS[R.currentEpisodeId]) {
+      delete WATCH_PROGRESS[R.currentEpisodeId];
+      writeProgress();
+    }
+    return;
+  }
+  WATCH_PROGRESS[R.currentEpisodeId] = { seriesId: R.currentSeriesId, pos: at, dur, updatedAt: Date.now() };
+  writeProgress();
 }
 
 /* ================================================================ sources */
@@ -3382,6 +3479,13 @@ function setSource(src, startAt = 0) {
 
   const title = String(src?.title || "Untitled");
   const prevTitle = R.state?.title || "";
+
+  // Single chokepoint for every "load a video" path — this is where we learn
+  // whether the thing now playing is a library episode (Continue Watching
+  // tracks progress against these two ids) or something ad hoc (a pasted
+  // link, a local file), in which case progress simply isn't tracked.
+  R.currentEpisodeId = src?.episodeId || null;
+  R.currentSeriesId = src?.seriesId || null;
 
   const patch = {
     kind,
