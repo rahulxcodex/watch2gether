@@ -627,6 +627,61 @@ html,body{max-width:100%;overflow-x:hidden;}
 .form-section-label:first-child{margin-top:0;}
 @media(max-width:640px){.netflix-form-card.form-with-preview .library-form{grid-template-columns:1fr;}.form-preview-pane{flex-direction:row;padding:14px 16px;}.form-preview-art{width:64px;}}
 
+
+/* -------------------------------------------------------- tile uniformity
+   Poster tiles (library cards, hero picker, browse grid, room cards) were
+   drifting apart in size: the poster <img> and the empty/fallback state sat
+   in normal flow rather than being pinned to the same box, so a card whose
+   image hadn't loaded yet (or had none) could be a different height than
+   its siblings for a frame or two, and the skeleton and image weren't on the
+   exact same box either. Every tile below is now pinned to an explicit,
+   identical box regardless of which state it's in. */
+.netflix-card{contain:layout size;}
+.netflix-card img,
+.netflix-card .poster-fallback,
+.netflix-card .netflix-card-skeleton{position:absolute;inset:0;width:100%;height:100%;}
+.catalogue-card-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.hero-pick{flex:0 0 54px;background-size:cover;background-position:center;}
+
+/* --------------------------------------------------------- smooth crossfade
+   Poster pop-in: the skeleton used to be removed the instant installPoster()
+   ran, before the new <img> had actually finished loading, leaving a blank
+   gap between shimmer and image. The skeleton now fades out in step with
+   the image fading in (see app.js) instead of disappearing first. */
+.netflix-card-skeleton{transition:opacity .25s ease;}
+.netflix-card-skeleton.fading{opacity:0;}
+.netflix-card img{transition:opacity .3s ease;}
+
+/* Hero backdrop crossfade: swapping style.backgroundImage on one element is
+   an instant cut (browsers don't animate background-image), which is why
+   rotating through the hero picker used to jump instead of fade. Two
+   stacked layers now ping-pong opacity between them instead. */
+.netflix-hero-backdrop{position:absolute;inset:0;}
+.netflix-hero-backdrop-layer{position:absolute;inset:0;background-position:center;background-size:cover;opacity:0;transition:opacity .5s ease;}
+.netflix-hero-backdrop-layer.on{opacity:.9;}
+.netflix-hero-backdrop-layer:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#080808 0%,rgba(8,8,8,.9) 26%,rgba(8,8,8,.45) 60%,rgba(8,8,8,.1) 100%),linear-gradient(0deg,#080808 0%,transparent 38%,rgba(8,8,8,.35) 100%);}
+.hero-pick{transition:opacity .2s,border-color .2s,transform .2s,box-shadow .2s;}
+.netflix-hero-backdrop{opacity:1!important;}
+.netflix-hero-backdrop:after{content:none!important;}
+
+/* ------------------------------------------------------------ diagnostics */
+.diag{position:fixed;right:14px;bottom:14px;z-index:95;width:290px;max-width:calc(100vw - 28px);
+  background:rgba(10,13,19,.94);backdrop-filter:blur(14px);border:1px solid var(--line);
+  border-radius:11px;box-shadow:0 20px 50px rgba(0,0,0,.6);font-family:var(--mono);font-size:11.5px;
+  color:var(--dim);overflow:hidden}
+.diag-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;
+  border-bottom:1px solid var(--line-soft);color:var(--text);font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;font-family:var(--ui);font-weight:500}
+.diag-head button{color:var(--dim);font-size:16px;padding:0 4px;line-height:1}
+.diag-head button:hover{color:var(--text)}
+.diag-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;padding:10px 12px;max-height:60vh;overflow-y:auto}
+.diag-grid .k{color:var(--dimmer)}
+.diag-grid .v{color:var(--text);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.diag-grid .v.warn{color:var(--warn)}
+.diag-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.diag-dot.ok{background:#3ED598;box-shadow:0 0 6px rgba(62,213,152,.7)}
+.diag-dot.bad{background:#F2555A;box-shadow:0 0 6px rgba(242,85,90,.7)}
+
 </style>
 </head>
 <body>
@@ -652,7 +707,10 @@ html,body{max-width:100%;overflow-x:hidden;}
     </nav>
 
     <section class="netflix-hero" id="libraryHero">
-      <div class="netflix-hero-backdrop" id="libraryHeroBackdrop"></div>
+      <div class="netflix-hero-backdrop" id="libraryHeroBackdrop">
+        <div class="netflix-hero-backdrop-layer" id="heroBackdropA"></div>
+        <div class="netflix-hero-backdrop-layer" id="heroBackdropB"></div>
+      </div>
       <div class="netflix-hero-poster-wrap" aria-hidden="true"><img id="libraryHeroPoster" class="netflix-hero-poster" alt=""></div>
       <div class="netflix-hero-copy">
         <div class="netflix-kicker" id="libraryHeroKicker">MY LIBRARY</div>
@@ -993,6 +1051,12 @@ html,body{max-width:100%;overflow-x:hidden;}
           <div class="set-head"><span class="eyebrow">Connection</span></div>
           <p class="note mono" id="netVal">connecting…</p>
         </div>
+        <div class="set">
+          <div class="toggle">
+            <span>Diagnostics<small>Buffer, drift, network, dropped frames — Ctrl+Shift+D also opens this.</small></span>
+            <button class="btn ghost" id="diagToggle" style="padding:7px 12px;font-size:12px;flex:none">🛠️ Open</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1064,6 +1128,14 @@ html,body{max-width:100%;overflow-x:hidden;}
 
 <div class="toast" id="toast"></div>
 
+<!-- Hidden by default. Toggle with Ctrl+Shift+D (or tap the 🛠 in the room
+     rail's Room panel). Pure readout, no controls — safe to leave wired up
+     in production, nobody stumbles into it by accident. -->
+<div class="diag" id="diag" hidden>
+  <div class="diag-head">🛠️ ROOM DIAGNOSTICS <button id="diagClose" type="button" aria-label="Close diagnostics">×</button></div>
+  <div class="diag-grid" id="diagGrid"></div>
+</div>
+
 <div class="ask" id="ask">
   <div class="ask-card">
     <h3 id="askTitle"></h3>
@@ -1081,6 +1153,10 @@ html,body{max-width:100%;overflow-x:hidden;}
 <input type="file" id="subPick" accept=".srt,.vtt,.ass,.ssa,text/vtt,application/x-subrip" hidden>
 <div id="voices" hidden></div>
 
-<script type="module" src="./app.js?v=20260814-4"></script>
+<!-- Vercel Analytics — free on every Vercel plan, no config beyond turning it
+     on for this project (Vercel dashboard → Project → Analytics → Enable).
+     Vercel serves this script itself; it 404s harmlessly if Analytics is off. -->
+<script defer src="/_vercel/insights/script.js"></script>
+<script type="module" src="./app.js?v=20260814-6"></script>
 </body>
 </html>
