@@ -4238,7 +4238,7 @@ function addMsg(m) {
     el.className = "msg reaction";
     el.innerHTML =
       `<span class="from" style="color:${colorOf(i < 0 ? 0 : i)}">${esc(m.name || "Guest")}</span>` +
-      `<span class="rx-emoji">${m.reaction}</span>`;
+      `<span class="rx-emoji">${esc(m.reaction)}</span>`;
     box.appendChild(el);
     box.scrollTop = box.scrollHeight;
     // The sender already saw their own reaction float locally on click; only
