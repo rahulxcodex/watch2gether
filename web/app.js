@@ -73,6 +73,12 @@ if (CFG.analytics) {
     .catch(() => {});   // blocked by extensions more often than not
 }
 
+// "Our own" analytics — see web/analytics.js. Falls back to a no-op so every
+// track(...) call below stays safe to leave in place even if it's off.
+import { createTracker } from "./analytics.js";
+const track = CFG.ownAnalytics ? createTracker(db, { ref, push, serverTimestamp }) : () => {};
+track("page_view", { path: location.pathname });
+
 /* ------------------------------------------------------------- shorthands */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -121,6 +127,7 @@ const R = {
   refs: {},
   pendingSource: null,
   announcedJoin: false, hadMemberSnapshot: false,
+  connected: false, hls: null,
 };
 
 /* ------------------------------------------------------------------ icons */
@@ -1480,6 +1487,28 @@ function setBackgroundWithFallback(el, url, fallbackLabel = "") {
   };
   probe.src = url;
 }
+
+// Dedicated crossfade for the hero backdrop's two stacked layers (see
+// index.html: #heroBackdropA/#heroBackdropB). style.backgroundImage can't be
+// CSS-transitioned, so this preloads the next image, paints it onto the
+// currently-hidden layer, then flips which layer is "on" — the opacity
+// transition on .netflix-hero-backdrop-layer does the actual fade.
+let heroBackdropOnB = false;
+function setHeroBackdrop(url) {
+  const a = $("#heroBackdropA"), b = $("#heroBackdropB");
+  if (!a || !b) return;
+  const next = heroBackdropOnB ? a : b;
+  const prev = heroBackdropOnB ? b : a;
+  if (!url) { a.classList.remove("on"); b.classList.remove("on"); return; }
+  const probe = new Image();
+  probe.onload = () => {
+    next.style.backgroundImage = `url("${url}")`;
+    next.classList.add("on");
+    prev.classList.remove("on");
+    heroBackdropOnB = !heroBackdropOnB;
+  };
+  probe.src = url;
+}
 function titleMeta(series) {
   const art = tmdbArt(series) || {};
   const type = mediaTypeOf(series) === "movie" ? "Movie" : "Series";
@@ -1640,10 +1669,12 @@ function renderNetflixCard(series) {
   card.appendChild(skeleton);
 
   const installPoster = (url) => {
-    skeleton.remove();
     const old = card.querySelector("img,.poster-fallback");
     if (old) old.remove();
+    const clearSkeleton = () => skeleton.remove();
     if (!url) {
+      skeleton.classList.add("fading");
+      setTimeout(clearSkeleton, 260);
       card.insertBefore(makePosterFallback(series.name || type), card.firstChild);
       return;
     }
@@ -1651,9 +1682,18 @@ function renderNetflixCard(series) {
     img.src = url;
     img.alt = series.name || type;
     img.loading = "lazy";
-    img.addEventListener("load", () => img.classList.add("loaded"), { once: true });
+    img.addEventListener("load", () => {
+      img.classList.add("loaded");
+      // Fade the shimmer out in step with the poster fading in, instead of
+      // yanking it away the instant installPoster() was called — that gap
+      // between skeleton and loaded image was the visible "pop".
+      skeleton.classList.add("fading");
+      setTimeout(clearSkeleton, 260);
+    }, { once: true });
     img.addEventListener("error", () => {
       img.replaceWith(makePosterFallback(series.name || type));
+      skeleton.classList.add("fading");
+      setTimeout(clearSkeleton, 260);
     }, { once: true });
     card.insertBefore(img, card.firstChild);
   };
@@ -1868,7 +1908,7 @@ function renderLanding() {
       const text = String(m ?? "");
       return `<span${text.startsWith("★") ? ' class="rating"' : ""}>${esc(text)}</span>`;
     }).join("");
-    setBackgroundWithFallback(heroBackdrop, back);
+    setHeroBackdrop(back);
     const heroWatch = $("#libraryHeroWatch");
     const playableHeroEpisode = Array.isArray(h.episodes) ? h.episodes.find((e) => String(e?.url || "").trim()) : null;
     heroWatch.disabled = false;
@@ -1884,7 +1924,7 @@ function renderLanding() {
     heroTitle.textContent = "Your library";
     heroSummary.textContent = "Add a movie or series to build your personal library.";
     heroMeta.innerHTML = "";
-    heroBackdrop.style.backgroundImage = "";
+    setHeroBackdrop("");
     $("#libraryHeroPicker").hidden = true;
     const emptyHeroPoster = $(".netflix-hero-poster-wrap");
     if (emptyHeroPoster) emptyHeroPoster.classList.add("is-empty");
@@ -2412,6 +2452,7 @@ async function join() {
   $("#app").classList.add("on");
   $("#roomName").textContent = code;
   $("#enter").disabled = false;
+  track("room_joined");
 
   try { localStorage.wtName = name; } catch {}
   rememberRoom(code, {
@@ -2465,6 +2506,7 @@ function wireRoom() {
   });
 
   onValue(ref(db, ".info/connected"), (s) => {
+    R.connected = !!s.val();
     if (!s.val()) return void say("Offline — reconnecting");
     // Re-arm on every reconnect: a disconnect handler only fires once.
     onDisconnect(R.refs.me).remove();
@@ -3355,6 +3397,7 @@ function setSource(src, startAt = 0) {
   };
 
   ctl(patch);
+  track("video_started", { kind });
 
   // Announce it once, from whoever's client just made the switch — this is
   // the single chokepoint every "load a video" path runs through, so there's
@@ -4217,6 +4260,7 @@ $("#chatIn").addEventListener("keydown", (e) => {
   push(R.refs.chat, { uid: R.uid, name: R.name, text, at: serverTimestamp() })
     .catch((e) => fbError(e, "chat message"));
   e.target.value = "";
+  track("chat_sent");
 });
 
 function addMsg(m) {
@@ -4968,4 +5012,111 @@ addEventListener("beforeunload", () => {
     overlay.hidden = true;
     if (abortCtrl) abortCtrl.abort();
   }
+})();
+
+/* ======================================================== room diagnostics
+ * Hidden by default (Ctrl+Shift+D, or the 🛠️ button in Room settings).
+ * Pure readout — no controls — pulling straight from the same state the
+ * sync loop and player adapter already track, so this stays truthful to
+ * whatever's actually going on rather than a separate measurement.
+ * ======================================================== */
+(function diagnosticsPanel() {
+  const panel = $("#diag");
+  const grid = $("#diagGrid");
+  if (!panel || !grid) return;
+
+  const dot = (ok) => `<span class="diag-dot ${ok ? "ok" : "bad"}"></span>${ok ? "OK" : "Down"}`;
+  const row = (k, v) => `<div class="k">${k}</div><div class="v">${v}</div>`;
+
+  function resolutionLabel(w, h) {
+    if (!w || !h) return "—";
+    const tall = Math.min(w, h) === h ? h : w; // player is always landscape-oriented here
+    const short = Math.max(w, h);
+    const buckets = [[4320, "8K"], [2160, "4K"], [1440, "1440p"], [1080, "1080p"],
+      [720, "720p"], [480, "480p"], [360, "360p"]];
+    const px = Math.min(w, h);
+    for (const [min, label] of buckets) if (px >= min * 0.9) return `${label} (${w}×${h})`;
+    return `${w}×${h}`;
+  }
+
+  function estimateMbps() {
+    // hls.js tracks a rolling bandwidth estimate once it's downloaded a
+    // couple of segments; that's a real, live figure, not a guess.
+    const hlsEst = R.hls?.bandwidthEstimate;
+    if (typeof hlsEst === "number" && hlsEst > 0) return hlsEst / 1e6;
+    const conn = navigator.connection;
+    if (conn?.downlink) return conn.downlink; // Mbps, browser's own estimate
+    return null;
+  }
+
+  function bufferAheadSeconds() {
+    if (PL.kind === "yt") return null; // YouTube's iframe doesn't expose buffered ranges
+    try {
+      const t = v.currentTime;
+      for (let i = 0; i < v.buffered.length; i++) {
+        if (v.buffered.start(i) <= t && t <= v.buffered.end(i)) return v.buffered.end(i) - t;
+      }
+    } catch {}
+    return 0;
+  }
+
+  function droppedFrames() {
+    try {
+      const q = v.getVideoPlaybackQuality?.();
+      return q ? q.droppedVideoFrames : null;
+    } catch { return null; }
+  }
+
+  function render() {
+    if (panel.hidden) return;
+    const authed = !!auth.currentUser;
+    const playerReady = PL.kind === "yt" ? PL.ytReady : v.readyState >= 2;
+    const usingHls = !!R.hls;
+    const hlsOk = !usingHls || (!R.hls.media?.error && playerReady);
+
+    const buf = bufferAheadSeconds();
+    const mbps = estimateMbps();
+    const playbackPos = PL.time();
+    const roomPos = R.state ? expectedPos() : null;
+    const driftMs = roomPos != null ? Math.round((playbackPos - roomPos) * 1000) : null;
+    const dropped = droppedFrames();
+    const res = PL.kind === "yt" ? "—" : resolutionLabel(v.videoWidth, v.videoHeight);
+
+    grid.innerHTML = [
+      row("Connection", dot(R.connected)),
+      row("Firebase", dot(authed)),
+      row("Player", dot(playerReady)),
+      row("HLS", usingHls ? dot(hlsOk) : '<span class="diag-dot ok"></span>n/a'),
+      row("Buffer", buf == null ? "—" : `${buf.toFixed(1)} sec`),
+      row("Network", mbps == null ? "—" : `${mbps.toFixed(1)} Mbps`),
+      row("Playback", playbackPos.toFixed(3)),
+      row("Room position", roomPos == null ? "—" : roomPos.toFixed(3)),
+      row("Drift", driftMs == null ? "—"
+        : `<span class="${Math.abs(driftMs) > 800 ? "warn" : ""}">${driftMs >= 0 ? "+" : ""}${driftMs} ms</span>`),
+      row("Dropped frames", dropped == null ? "—" : dropped),
+      row("Video resolution", res),
+    ].join("");
+  }
+
+  let diagTimer = null;
+  function open() {
+    panel.hidden = false;
+    render();
+    diagTimer = setInterval(render, 500);
+  }
+  function close() {
+    panel.hidden = true;
+    clearInterval(diagTimer);
+    diagTimer = null;
+  }
+  function toggle() { panel.hidden ? open() : close(); }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.shiftKey && (e.key === "D" || e.key === "d")) {
+      e.preventDefault();
+      toggle();
+    }
+  });
+  $("#diagClose")?.addEventListener("click", close);
+  $("#diagToggle")?.addEventListener("click", toggle);
 })();
