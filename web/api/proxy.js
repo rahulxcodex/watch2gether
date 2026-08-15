@@ -19,6 +19,7 @@ export const config = {
  * simply resolves to that address (rebinding). safeFetch now resolves and
  * checks the real IP at every redirect hop — see api/_security.js. */
 import { safeFetch } from "./_security.js";
+import { rateLimited } from "./_ratelimit.js";
 
 export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin", "*");
@@ -32,6 +33,12 @@ export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  // This is an open bandwidth relay with no auth — legitimate HLS playback
+  // makes many small segment requests per minute, so the limit is generous;
+  // it's only meant to stop someone scripting it as a general-purpose proxy
+  // against your Vercel bill, not to interfere with normal playback.
+  if (rateLimited(req, res, "proxy", { limit: 300, windowMs: 60_000 })) return;
 
   const target = req.query?.url;
 
