@@ -238,13 +238,82 @@ async function media(key, request, env) {
  * out anything private. Restricted to http(s) and blocks obviously-local
  * targets to stop it being used to probe the Worker's own network.
  * ------------------------------------------------------------------ */
-function isPrivateHost(hostname) {
+/* NOTE: the old version of this function only pattern-matched the literal
+ * hostname string. That stops "http://169.254.169.254/..." but not
+ * "http://evil.example.com/..." whose DNS record simply points at
+ * 169.254.169.254 (or 127.0.0.1, or an internal 10.x address) — classic DNS
+ * rebinding. Workers have no `node:dns`, so we resolve via DNS-over-HTTPS
+ * (Cloudflare's own resolver, reached over plain fetch) and check the
+ * *actual* IP(s) a hostname comes back with, the same way api/_security.js
+ * does on the Vercel side with dns.lookup(). */
+function isPrivateIPv4(ip) {
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n))) return true; // malformed -> refuse
+  const [a, b] = p;
+  if (a === 0) return true;                          // 0.0.0.0/8
+  if (a === 10) return true;                          // 10.0.0.0/8
+  if (a === 127) return true;                         // 127.0.0.0/8 loopback
+  if (a === 169 && b === 254) return true;            // 169.254.0.0/16 link-local / cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true;    // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;             // 192.168.0.0/16
+  if (a === 100 && b >= 64 && b <= 127) return true;    // 100.64.0.0/10 CGNAT
+  if (a === 192 && b === 0 && p[2] === 2) return true;   // 192.0.2.0/24 TEST-NET-1
+  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
+  if (a === 224 || a >= 240) return true;              // multicast / reserved
+  return false;
+}
+
+function isPrivateIPv6(ip) {
+  const h = ip.toLowerCase();
+  if (h === "::1" || h === "::") return true;          // loopback / unspecified
+  if (h.startsWith("fe80:")) return true;               // link-local
+  if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;        // fc00::/7 unique local
+  const mapped = h.match(/^::(ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateIPv4(mapped[2]);          // IPv4-mapped/compatible
+  return false;
+}
+
+function ipVersion(ip) {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return 4;
+  if (ip.includes(":")) return 6;
+  return 0;
+}
+
+function isPrivateIP(ip) {
+  const v = ipVersion(ip);
+  if (v === 4) return isPrivateIPv4(ip);
+  if (v === 6) return isPrivateIPv6(ip);
+  return true; // couldn't classify -> refuse rather than guess
+}
+
+/* Resolve via DoH and refuse if ANY returned address is private. A host
+ * with mixed public/internal A records is exactly the rebinding trick this
+ * exists to stop, so one bad address fails the whole hostname. */
+async function resolveAll(hostname) {
+  const addrs = [];
+  for (const type of ["A", "AAAA"]) {
+    try {
+      const res = await fetch(
+        `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=${type}`,
+        { headers: { accept: "application/dns-json" } }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const ans of data.Answer || []) {
+        if (ans.type === (type === "A" ? 1 : 28)) addrs.push(ans.data);
+      }
+    } catch { /* treat as unresolved for this record type */ }
+  }
+  return addrs;
+}
+
+async function hostnameIsSafe(hostname) {
   const h = hostname.toLowerCase();
-  return (
-    /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)/i.test(h) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-    /^::ffff:(127\.|10\.|192\.168\.|169\.254\.)/i.test(h)
-  );
+  if (h === "localhost") return false;
+  if (ipVersion(h)) return !isPrivateIP(h); // literal IP given directly
+  const addrs = await resolveAll(h);
+  if (!addrs.length) return false; // couldn't resolve -> refuse
+  return addrs.every((ip) => !isPrivateIP(ip));
 }
 
 const MAX_REDIRECTS = 5;
@@ -253,13 +322,14 @@ const MAX_REDIRECTS = 5;
  * 30x us to a private/local address afterwards (cloud metadata endpoint,
  * internal service, etc.) and the follower would go there anyway, since
  * this Worker runs inside Cloudflare's network. Walk the chain by hand and
- * re-check every hop against the same guard. */
+ * re-check every hop — including its real resolved IP — against the guard. */
 async function safeFetch(target, options) {
   let current = target;
   for (let i = 0; i <= MAX_REDIRECTS; i++) {
     let t;
     try { t = new URL(current); } catch { throw new Error("Bad URL"); }
-    if (isPrivateHost(t.hostname)) throw new Error("Refused: private/local target");
+    if (!/^https?:$/.test(t.protocol)) throw new Error("Refused: only http(s) URLs are allowed.");
+    if (!(await hostnameIsSafe(t.hostname))) throw new Error("Refused: private, local, or unresolvable target.");
     const res = await fetch(current, { ...options, redirect: "manual" });
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       const loc = res.headers.get("location");
@@ -346,11 +416,31 @@ function guessType(key) {
  * fresh deploy can't be turned into someone else's file host.
  *   wrangler secret put UPLOAD_TOKEN
  * ------------------------------------------------------------------ */
+/* Plain !== leaks timing info proportional to how many leading bytes match,
+ * in principle letting an attacker recover the token byte-by-byte. The
+ * Workers runtime exposes WebCrypto, so use a real constant-time compare
+ * instead of a hand-rolled loop (which JIT/branch behavior can still leak). */
+async function timingSafeEqual(a, b) {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a), bb = enc.encode(b);
+  // Hash both first so the comparison itself always operates on fixed-length
+  // digests regardless of input length (length itself is not secret here,
+  // but this keeps the compare uniform either way).
+  const [ah, bh] = await Promise.all(
+    [ab, bb].map((buf) => crypto.subtle.digest("SHA-256", buf))
+  );
+  const au = new Uint8Array(ah), bu = new Uint8Array(bh);
+  let diff = 0;
+  for (let i = 0; i < au.length; i++) diff |= au[i] ^ bu[i];
+  return diff === 0;
+}
+
 async function upload(url, request, env) {
   if (!env.UPLOAD_TOKEN) {
     return json({ error: "Uploads are off. Set the UPLOAD_TOKEN secret to turn them on." }, env, 503);
   }
-  if (request.headers.get("x-upload-token") !== env.UPLOAD_TOKEN) {
+  const given = request.headers.get("x-upload-token") || "";
+  if (!(await timingSafeEqual(given, env.UPLOAD_TOKEN))) {
     return json({ error: "Wrong upload key." }, env, 403);
   }
   if (!env.MEDIA) return json({ error: "No bucket bound" }, env, 500);
