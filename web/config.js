@@ -37,6 +37,14 @@ export const CFG = {
   // Optional. Public R2 domain, if you have one. Empty routes through the Worker.
   MEDIA: "",
 
-  // Google Analytics. Harmless to leave off; ad blockers stop it anyway.
+  // Google Analytics (via the Firebase measurementId above). Off by default —
+  // it's a third-party script, and ad blockers stop it more often than not.
   analytics: false,
+
+  // Our own analytics: free, no third-party script, no cookies. Just appends
+  // small anonymous event counts (page view, room joined, video started, chat
+  // sent, ...) to the same Firebase Realtime Database you're already using
+  // for room sync — see web/analytics.js and the analytics/ rules in
+  // firebase/database.rules.json. Safe to leave on; safe to turn off.
+  ownAnalytics: true,
 };
