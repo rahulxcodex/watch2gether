@@ -27,6 +27,7 @@ const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "openrouter/auto";
  * used plain redirect:"follow" with no re-check at each hop at all. Both now
  * go through the shared resolver-based guard — see api/_security.js. */
 import { safeFetch, isBadUrl } from "./_security.js";
+import { rateLimited } from "./_ratelimit.js";
 const badUrl = (value) => isBadUrl(value, MAX_URL_LENGTH);
 
 function extractGeminiText(response) {
@@ -184,6 +185,9 @@ export default async function handler(req, res) {
   res.setHeader("cache-control", "no-store");
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({error:"Method not allowed"});
+  // This route makes a paid LLM call per request and has no auth in front
+  // of it, so cap how often any one caller can hit it.
+  if (rateLimited(req, res, "identify", { limit: 10, windowMs: 60_000 })) return;
 
   const series = String(req.body?.series || "").trim().slice(0, MAX_INPUT);
   const url = String(req.body?.url || "").trim();
