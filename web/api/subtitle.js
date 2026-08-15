@@ -22,6 +22,7 @@ const MAX_SUBTITLE_BYTES = 1500000;
  * record simply resolves to that address (rebinding). Both now resolve and
  * check the real IP, at every redirect hop — see api/_security.js. */
 import { safeFetch, isBadUrl } from "./_security.js";
+import { rateLimited } from "./_ratelimit.js";
 const badUrl = (value) => isBadUrl(value, MAX_URL_LENGTH);
 
 export default async function handler(req, res) {
@@ -32,6 +33,7 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (rateLimited(req, res, "subtitle", { limit: 20, windowMs: 60_000 })) return;
 
   const url = String(req.body?.url || "").trim();
   if (await badUrl(url)) {
