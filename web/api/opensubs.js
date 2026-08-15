@@ -11,6 +11,7 @@
  *   OPENSUBTITLES_PASSWORD
  */
 export const config = { runtime: "nodejs" };
+import { rateLimited } from "./_ratelimit.js";
 
 const API_KEY = process.env.OPENSUBTITLES_API_KEY || "";
 const OS_USER = process.env.OPENSUBTITLES_USERNAME || "";
@@ -242,6 +243,10 @@ export default async function handler(req, res) {
   res.setHeader("cache-control", "no-store");
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  // A single request here can trigger dozens of searches and up to
+  // MAX_DOWNLOADS downloads against a shared OpenSubtitles account with no
+  // auth in front of this route — keep callers from looping it.
+  if (rateLimited(req, res, "opensubs", { limit: 6, windowMs: 60_000 })) return;
 
   const url = String(req.body?.url || "").trim();
   const imdbId = String(req.body?.imdbId || "").trim().toLowerCase();
