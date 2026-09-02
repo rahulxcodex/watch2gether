@@ -1,4 +1,4 @@
-import { MediaType } from "@watch2gether/shared";
+import { MediaType, PartnerProgressDTO } from "@watch2gether/shared";
 
 export interface UnifiedPlayerInstance {
   play: () => Promise<void>;
@@ -28,8 +28,11 @@ export interface PlayerEvents {
 export interface VideoPlayerProps extends PlayerEvents {
   mediaUrl: string;
   mediaType: MediaType;
+  title?: string;
   canControl?: boolean;
   disabledReason?: string;
+  partnerProgress?: PartnerProgressDTO | null;
+  isDucked?: boolean;
   onChangeMedia?: (newUrl: string, newType: MediaType) => void;
   className?: string;
 }

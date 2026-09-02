@@ -16,7 +16,7 @@ export const rooms = sqliteTable('rooms', {
   name: text('name').notNull(),
   hostId: text('host_id').notNull().references(() => users.id),
   mediaUrl: text('media_url').notNull().default(''),
-  mediaType: text('media_type', { enum: ['MP4', 'YOUTUBE'] }).notNull().default('MP4'),
+  mediaType: text('media_type', { enum: ['MP4', 'YOUTUBE', 'LOCAL_FILE', 'HLS'] }).notNull().default('MP4'),
   playbackState: text('playback_state', { enum: ['IDLE', 'PLAYING', 'PAUSED'] }).notNull().default('IDLE'),
   currentTime: real('current_time').notNull().default(0),
   permissionMode: text('permission_mode', { enum: ['HOST_ONLY', 'SHARED'] }).notNull().default('HOST_ONLY'),

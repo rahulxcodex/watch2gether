@@ -4,12 +4,12 @@
   "description": "Playwright E2E test suite for Watch2Gether acceptance criteria verification",
   "private": true,
   "scripts": {
-    "test": "playwright test",
-    "test:headed": "playwright test --headed",
-    "test:report": "playwright show-report",
-    "test:sync": "playwright test tests/sync.spec.ts",
-    "test:auth": "playwright test tests/auth.spec.ts",
-    "test:chat": "playwright test tests/chat.spec.ts"
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:report": "npx playwright show-report",
+    "test:sync": "npx playwright test tests/sync.spec.ts",
+    "test:auth": "npx playwright test tests/auth.spec.ts",
+    "test:chat": "npx playwright test tests/chat.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.0",

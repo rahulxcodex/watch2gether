@@ -1,7 +1,7 @@
 import { getDb } from '../db/db';
 import { rooms, NewRoom, Room } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import type { PermissionMode, MediaType, PlaybackStatus } from '@watch2gether/shared';
+import type { PermissionMode, MediaType, PlaybackStatus, QueueItemDTO } from '@watch2gether/shared';
 
 export type PlaybackState = 'PLAYING' | 'PAUSED' | 'IDLE';
 
@@ -28,6 +28,7 @@ export interface RoomState {
   updatedAt: number; // Authoritative server timestamp (epoch ms)
   version: number; // Monotonically increasing sequence number
   members: Map<string, RoomMember>;
+  queue?: QueueItemDTO[]; // The Shelf: queued media playlist
   createdAt: number;
 }
 
@@ -72,6 +73,8 @@ export interface IRoomStateStore {
   ): Promise<RoomState | null>;
   setPermissionMode(roomCode: string, mode: PermissionMode): Promise<RoomState | null>;
   setHost(roomCode: string, newHostId: string): Promise<RoomState | null>;
+  addToQueue(roomCode: string, item: QueueItemDTO): Promise<RoomState | null>;
+  removeFromQueue(roomCode: string, itemId: string): Promise<RoomState | null>;
 }
 
 export class MemoryRoomStateStore implements IRoomStateStore {
@@ -98,6 +101,7 @@ export class MemoryRoomStateStore implements IRoomStateStore {
           updatedAt: dbRoom.updatedAt.getTime(),
           version: dbRoom.version,
           members: new Map(),
+          queue: [],
           createdAt: dbRoom.createdAt.getTime(),
         };
         this.rooms.set(code, room);
@@ -112,8 +116,25 @@ export class MemoryRoomStateStore implements IRoomStateStore {
       ...init,
       roomCode,
       members: new Map(),
+      queue: init.queue || [],
     };
     this.rooms.set(roomCode, room);
+    return { ...room, members: new Map(room.members) };
+  }
+
+  public async addToQueue(roomCode: string, item: QueueItemDTO): Promise<RoomState | null> {
+    const code = roomCode.toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room) return null;
+    room.queue = [...(room.queue || []), item];
+    return { ...room, members: new Map(room.members) };
+  }
+
+  public async removeFromQueue(roomCode: string, itemId: string): Promise<RoomState | null> {
+    const code = roomCode.toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room) return null;
+    room.queue = (room.queue || []).filter((q) => q.id !== itemId);
     return { ...room, members: new Map(room.members) };
   }
 

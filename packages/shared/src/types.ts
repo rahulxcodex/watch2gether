@@ -6,7 +6,7 @@ export type PlaybackStatus = 'PLAYING' | 'PAUSED' | 'BUFFERING' | 'IDLE';
 /**
  * Supported media source types.
  */
-export type MediaType = 'MP4' | 'YOUTUBE';
+export type MediaType = 'MP4' | 'YOUTUBE' | 'LOCAL_FILE' | 'HLS';
 
 /**
  * Permission policy for room media playback control.
@@ -64,6 +64,7 @@ export interface RoomDTO {
   playbackState?: PlaybackStatus;     // Current playback status
   currentTime?: number;               // Current playback time in seconds
   version?: number;                   // Monotonic state version
+  queue?: QueueItemDTO[];              // The Shelf: queued media playlist
   createdAt: number | string;         // Creation timestamp (ms or ISO string)
   updatedAt?: number | string;        // Last modified timestamp (ms or ISO string)
 }
@@ -196,3 +197,65 @@ export interface ErrorResponseDTO {
   details?: unknown;
   action?: string;
 }
+
+/**
+ * Parsed individual subtitle cue.
+ */
+export interface SubtitleCue {
+  id?: string;
+  start: number;              // Start time in seconds
+  end: number;                // End time in seconds
+  text: string;               // Caption text content
+}
+
+/**
+ * Subtitle track descriptor.
+ */
+export interface SubtitleTrack {
+  key: string;
+  label: string;
+  language?: string;
+  url?: string;
+  content?: string;           // Raw SRT or VTT string
+}
+
+/**
+ * Media shelf / room playlist queue item.
+ */
+export interface QueueItemDTO {
+  id: string;
+  title: string;
+  url: string;
+  mediaType: MediaType;
+  duration?: number;
+  thumbnailUrl?: string;
+  addedBy?: string;
+  addedByName?: string;
+  createdAt: number;
+}
+
+/**
+ * WebRTC P2P Voice Chat Signal Payload.
+ */
+export interface PeerSignalPayload {
+  roomCode: string;
+  fromUserId: string;
+  toUserId?: string;          // Optional target user ID (empty for broadcast)
+  signalData: any;            // RTCSessionDescriptionInit or RTCIceCandidateInit
+  type: 'offer' | 'answer' | 'ice-candidate';
+}
+
+/**
+ * Partner progress report for the dual playhead scrubber ribbon.
+ */
+export interface PartnerProgressDTO {
+  userId: string;
+  name: string;
+  color?: string;
+  currentTime: number;        // Position in seconds
+  duration?: number;
+  isStalled?: boolean;
+  isSpeaking?: boolean;
+  updatedAt: number;
+}
+

@@ -12,9 +12,11 @@ import {
   Film,
   Sparkles,
   Settings,
+  Subtitles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { DualScrubber } from "./DualScrubber";
 import {
   Tooltip,
   TooltipContent,
@@ -30,18 +32,20 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatTime, cn } from "@/lib/utils";
-import { MediaType } from "@watch2gether/shared";
+import { MediaType, PartnerProgressDTO } from "@watch2gether/shared";
 
 interface PlayerControlsProps {
   isPlaying: boolean;
   currentTime: number;
   duration: number;
+  bufferProgress?: number;
   volume: number;
   isMuted: boolean;
   playbackRate: number;
   isFullscreen: boolean;
   canControl: boolean;
   disabledReason?: string;
+  partnerProgress?: PartnerProgressDTO | null;
   onPlayPause: () => void;
   onSeek: (time: number) => void;
   onVolumeChange: (vol: number) => void;
@@ -49,6 +53,8 @@ interface PlayerControlsProps {
   onRateChange: (rate: number) => void;
   onToggleFullscreen: () => void;
   onChangeMedia?: (newUrl: string, newType: MediaType) => void;
+  onOpenSubtitles?: () => void;
+  subtitlesActive?: boolean;
   currentMediaUrl?: string;
 }
 
@@ -56,12 +62,14 @@ export function PlayerControls({
   isPlaying,
   currentTime,
   duration,
+  bufferProgress = 0,
   volume,
   isMuted,
   playbackRate,
   isFullscreen,
   canControl,
   disabledReason = "Playback controls are locked to Room Host.",
+  partnerProgress,
   onPlayPause,
   onSeek,
   onVolumeChange,
@@ -69,6 +77,8 @@ export function PlayerControls({
   onRateChange,
   onToggleFullscreen,
   onChangeMedia,
+  onOpenSubtitles,
+  subtitlesActive = false,
   currentMediaUrl = "",
 }: PlayerControlsProps) {
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
@@ -89,23 +99,19 @@ export function PlayerControls({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 transition-opacity duration-300">
-        {/* Progress Bar / Scrubber */}
-        <div className="mb-3 flex items-center gap-3">
+        {/* Dual Playhead Scrubber / Drift Ribbon */}
+        <div className="mb-2 flex items-center gap-3">
           <span className="text-xs font-medium text-slate-300 w-12 text-right tabular-nums">
             {formatTime(currentTime)}
           </span>
           <div className="flex-1">
-            <Slider
-              value={[Math.min(currentTime, duration || 100)]}
-              max={duration > 0 ? duration : 100}
-              step={0.1}
-              disabled={!canControl}
-              onValueChange={(val) => {
-                if (canControl && val[0] !== undefined) {
-                  onSeek(val[0]);
-                }
-              }}
-              className={cn(!canControl && "opacity-60 cursor-not-allowed")}
+            <DualScrubber
+              currentTime={currentTime}
+              duration={duration}
+              bufferProgress={bufferProgress}
+              partnerProgress={partnerProgress}
+              canControl={canControl}
+              onSeek={onSeek}
             />
           </div>
           <span className="text-xs font-medium text-slate-400 w-12 tabular-nums">
@@ -230,6 +236,24 @@ export function PlayerControls({
                 </div>
               )}
             </div>
+
+            {/* Subtitles & Captions Settings */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onOpenSubtitles}
+              className={cn(
+                "h-9 w-9 text-slate-300 hover:text-white relative",
+                subtitlesActive && "text-indigo-400"
+              )}
+              aria-label="Subtitles"
+              title="Subtitles & Captions (Hotkey: C)"
+            >
+              <Subtitles className="h-4 w-4" />
+              {subtitlesActive && (
+                <span className="absolute bottom-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-indigo-400" />
+              )}
+            </Button>
 
             {/* Fullscreen Toggle */}
             <Button

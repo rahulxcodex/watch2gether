@@ -16,7 +16,8 @@
     "build": "npm run build:web",
     "start:backend": "cd backend && npm start",
     "start": "cd backend && npm start",
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm test -w @watch2gether/shared && npm test -w @watch2gether/backend && npm test -w @watch2gether/web",
+    "test:e2e": "npm test -w watch2gether-e2e",
     "lint": "npm run lint --workspaces --if-present"
   },
   "keywords": [

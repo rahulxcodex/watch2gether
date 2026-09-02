@@ -11,18 +11,24 @@ import React, {
 import { HTML5Player } from "./HTML5Player";
 import { YouTubePlayer } from "./YouTubePlayer";
 import { PlayerControls } from "./PlayerControls";
+import { SubtitleOverlay, SubtitleStyleOptions } from "./SubtitleOverlay";
+import { SubtitleSettingsModal } from "./SubtitleSettingsModal";
 import { AmbientGlow } from "@/components/visual/AmbientGlow";
 import { UnifiedPlayerInstance, VideoPlayerProps } from "./types";
-import { cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import { cn, formatTime } from "@/lib/utils";
+import { Loader2, Play, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
   (
     {
       mediaUrl,
       mediaType,
+      title,
       canControl = true,
       disabledReason,
+      partnerProgress,
+      isDucked = false,
       onPlay,
       onPause,
       onSeek,
@@ -51,7 +57,74 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
     const [showControls, setShowControls] = useState(true);
     const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Unified player API forwarded to parent (e.g. useSyncEngine)
+    // Subtitles State
+    const [isSubtitlesOpen, setIsSubtitlesOpen] = useState(false);
+    const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
+    const [subtitleOffset, setSubtitleOffset] = useState(0);
+    const [subtitleText, setSubtitleText] = useState<string>("");
+    const [subtitleName, setSubtitleName] = useState<string>("");
+    const [subtitleStyles, setSubtitleStyles] = useState<SubtitleStyleOptions>({
+      fontSize: "md",
+      color: "#FFFFFF",
+      backgroundColor: "rgba(0,0,0,0.7)",
+      bgOpacity: 0.7,
+      bottomPercent: 12,
+    });
+
+    // Resume watch prompt state
+    const [savedResumeTime, setSavedResumeTime] = useState<number | null>(null);
+    const [showResumeBanner, setShowResumeBanner] = useState(false);
+
+    // Check localStorage for previous watch progress
+    useEffect(() => {
+      if (!mediaUrl) return;
+      try {
+        const stored = localStorage.getItem("wtProgressV1");
+        if (stored) {
+          const map = JSON.parse(stored);
+          const saved = map[mediaUrl];
+          if (saved && saved.time > 10) {
+            setSavedResumeTime(saved.time);
+            setShowResumeBanner(true);
+          }
+        }
+      } catch (e) {
+        // Ignore parse error
+      }
+    }, [mediaUrl]);
+
+    // Save watch progress to localStorage every 5 seconds
+    useEffect(() => {
+      if (!mediaUrl || currentTime < 5) return;
+      const interval = setInterval(() => {
+        try {
+          const stored = localStorage.getItem("wtProgressV1");
+          const map = stored ? JSON.parse(stored) : {};
+          map[mediaUrl] = {
+            time: Math.floor(currentTime),
+            duration: Math.floor(duration),
+            title: title || mediaUrl,
+            updatedAt: Date.now(),
+          };
+          localStorage.setItem("wtProgressV1", JSON.stringify(map));
+        } catch (e) {
+          // Ignore write error
+        }
+      }, 5000);
+      return () => clearInterval(interval);
+    }, [mediaUrl, currentTime, duration, title]);
+
+    // Apply Audio Ducking: lowers volume to 25% when peer speaks
+    useEffect(() => {
+      if (!activePlayerRef.current) return;
+      if (isDucked) {
+        activePlayerRef.current.setVolume(volume * 0.25);
+      } else {
+        activePlayerRef.current.setVolume(volume);
+      }
+    }, [isDucked, volume]);
+
+    // Unified player API forwarded to parent
     const unifiedApi: UnifiedPlayerInstance = {
       play: async () => {
         setIsPlaying(true);
@@ -80,7 +153,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       setVolume: (vol: number) => {
         setVolumeState(vol);
         if (activePlayerRef.current) {
-          activePlayerRef.current.setVolume(vol);
+          activePlayerRef.current.setVolume(isDucked ? vol * 0.25 : vol);
         }
       },
       setMuted: (muted: boolean) => {
@@ -103,16 +176,16 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       },
     };
 
-    useImperativeHandle(ref, () => unifiedApi, [currentTime, duration, isPlaying, playbackRate]);
+    useImperativeHandle(ref, () => unifiedApi, [currentTime, duration, isPlaying, playbackRate, isDucked]);
 
     const handlePlayerReady = useCallback(
       (player: UnifiedPlayerInstance) => {
         activePlayerRef.current = player;
-        player.setVolume(volume);
+        player.setVolume(isDucked ? volume * 0.25 : volume);
         player.setMuted(isMuted);
         onReady?.(player);
       },
-      [onReady, volume, isMuted]
+      [onReady, volume, isMuted, isDucked]
     );
 
     const handlePlayPause = async () => {
@@ -176,6 +249,122 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       return () => document.removeEventListener("fullscreenchange", handleFsChange);
     }, []);
 
+    // Global Keyboard Shortcuts (Space, F, M, J/L, ArrowLeft/Right, ArrowUp/Down, C, [/])
+    useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        // Ignore if user is currently typing in an input or textarea
+        const target = e.target as HTMLElement;
+        if (
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable)
+        ) {
+          return;
+        }
+
+        switch (e.key) {
+          case " ":
+          case "k":
+          case "K":
+            e.preventDefault();
+            handlePlayPause();
+            break;
+          case "f":
+          case "F":
+            e.preventDefault();
+            handleToggleFullscreen();
+            break;
+          case "m":
+          case "M":
+            e.preventDefault();
+            handleToggleMute();
+            break;
+          case "j":
+          case "J":
+            e.preventDefault();
+            if (canControl) handleSeek(Math.max(0, currentTime - 10));
+            break;
+          case "l":
+          case "L":
+            e.preventDefault();
+            if (canControl) handleSeek(Math.min(duration, currentTime + 10));
+            break;
+          case "ArrowLeft":
+            e.preventDefault();
+            const stepLeft = e.shiftKey ? 30 : 5;
+            if (canControl) handleSeek(Math.max(0, currentTime - stepLeft));
+            break;
+          case "ArrowRight":
+            e.preventDefault();
+            const stepRight = e.shiftKey ? 30 : 5;
+            if (canControl) handleSeek(Math.min(duration, currentTime + stepRight));
+            break;
+          case "ArrowUp":
+            e.preventDefault();
+            handleVolumeChange(Math.min(1.0, volume + 0.1));
+            break;
+          case "ArrowDown":
+            e.preventDefault();
+            handleVolumeChange(Math.max(0, volume - 0.1));
+            break;
+          case "c":
+          case "C":
+            e.preventDefault();
+            setSubtitlesEnabled((prev) => !prev);
+            break;
+          case "[":
+            e.preventDefault();
+            setSubtitleOffset((prev) => Number((prev - 0.1).toFixed(1)));
+            break;
+          case "]":
+            e.preventDefault();
+            setSubtitleOffset((prev) => Number((prev + 0.1).toFixed(1)));
+            break;
+          default:
+            break;
+        }
+      };
+
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [
+      canControl,
+      currentTime,
+      duration,
+      volume,
+      isPlaying,
+      handlePlayPause,
+      handleSeek,
+      handleToggleFullscreen,
+      handleToggleMute,
+      handleVolumeChange,
+    ]);
+
+    // Drag-and-drop subtitle file directly onto player
+    const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files?.[0];
+      if (!file) return;
+
+      if (file.name.endsWith(".srt") || file.name.endsWith(".vtt")) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const text = event.target?.result as string;
+          if (text) {
+            setSubtitleText(text);
+            setSubtitleName(file.name);
+            setSubtitlesEnabled(true);
+          }
+        };
+        reader.readAsText(file);
+      }
+    };
+
     // Controls visibility timeout
     const triggerControlsActivity = () => {
       setShowControls(true);
@@ -194,6 +383,8 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
         ref={containerRef}
         onMouseMove={triggerControlsActivity}
         onTouchStart={triggerControlsActivity}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         className={cn(
           "relative group overflow-hidden rounded-2xl bg-black border border-slate-800 shadow-2xl aspect-video flex items-center justify-center select-none",
           className
@@ -202,7 +393,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
         {/* Ambient Backlight Glow */}
         <AmbientGlow isPlaying={isPlaying} />
 
-        {/* Media Adapter Component */}
+        {/* Media Adapter Component (YouTube, HTML5, or Local File) */}
         <div className="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden">
           {mediaType === "YOUTUBE" ? (
             <YouTubePlayer
@@ -279,6 +470,47 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
           )}
         </div>
 
+        {/* Custom Subtitles Overlay */}
+        <SubtitleOverlay
+          rawText={subtitleText}
+          currentTime={currentTime}
+          offsetSeconds={subtitleOffset}
+          isVisible={subtitlesEnabled}
+          styleOptions={subtitleStyles}
+        />
+
+        {/* Resume Watch Progress Banner */}
+        {showResumeBanner && savedResumeTime !== null && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-900/95 border border-indigo-500/40 text-xs text-white shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top duration-300">
+            <span>
+              Resume playback from <strong className="font-mono text-indigo-300">{formatTime(savedResumeTime)}</strong>?
+            </span>
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="glow"
+                className="h-6 px-2 text-[11px] font-bold"
+                onClick={() => {
+                  handleSeek(savedResumeTime);
+                  setShowResumeBanner(false);
+                }}
+              >
+                <Play className="h-3 w-3 mr-1 fill-current" />
+                Resume
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-[11px] text-slate-400 hover:text-white"
+                onClick={() => setShowResumeBanner(false)}
+              >
+                <RotateCcw className="h-3 w-3 mr-1" />
+                Start over
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Buffering Spinner */}
         {isBuffering && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
@@ -289,7 +521,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
           </div>
         )}
 
-        {/* Custom Video Controls Overlay */}
+        {/* Custom Video Controls Overlay with DualScrubber */}
         <div
           className={cn(
             "transition-opacity duration-300",
@@ -306,6 +538,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
             isFullscreen={isFullscreen}
             canControl={canControl}
             disabledReason={disabledReason}
+            partnerProgress={partnerProgress}
             onPlayPause={handlePlayPause}
             onSeek={handleSeek}
             onVolumeChange={handleVolumeChange}
@@ -313,9 +546,30 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
             onRateChange={handleRateChange}
             onToggleFullscreen={handleToggleFullscreen}
             onChangeMedia={onChangeMedia}
+            onOpenSubtitles={() => setIsSubtitlesOpen(true)}
+            subtitlesActive={subtitlesEnabled && !!subtitleText}
             currentMediaUrl={mediaUrl}
           />
         </div>
+
+        {/* Subtitle Settings Modal */}
+        <SubtitleSettingsModal
+          isOpen={isSubtitlesOpen}
+          onClose={() => setIsSubtitlesOpen(false)}
+          subtitlesEnabled={subtitlesEnabled}
+          onToggleEnabled={setSubtitlesEnabled}
+          offsetSeconds={subtitleOffset}
+          onOffsetChange={setSubtitleOffset}
+          styleOptions={subtitleStyles}
+          onStyleChange={(newStyles) =>
+            setSubtitleStyles((prev) => ({ ...prev, ...newStyles }))
+          }
+          onLoadSubtitleFile={(content, fileName) => {
+            setSubtitleText(content);
+            setSubtitleName(fileName);
+          }}
+          currentSubtitleName={subtitleName}
+        />
       </div>
     );
   }

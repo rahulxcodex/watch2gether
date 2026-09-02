@@ -10,6 +10,9 @@ import {
   Sparkles,
   Wifi,
   WifiOff,
+  Mic,
+  MicOff,
+  Radio,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +30,12 @@ interface RoomHeaderProps {
   onTogglePermission?: (mode: PermissionMode) => void;
   syncStatus: SyncEngineStatus;
   activeUsers: UserDTO[];
+  isVoiceActive?: boolean;
+  isVoiceMuted?: boolean;
+  isSpeaking?: boolean;
+  isPartnerSpeaking?: boolean;
+  onToggleVoice?: () => void;
+  onToggleVoiceMute?: () => void;
 }
 
 export function RoomHeader({
@@ -37,6 +46,12 @@ export function RoomHeader({
   onTogglePermission,
   syncStatus,
   activeUsers,
+  isVoiceActive = false,
+  isVoiceMuted = false,
+  isSpeaking = false,
+  isPartnerSpeaking = false,
+  onToggleVoice,
+  onToggleVoiceMute,
 }: RoomHeaderProps) {
   const [isShareOpen, setIsShareOpen] = useState(false);
 
@@ -115,6 +130,58 @@ export function RoomHeader({
 
         {/* Right: Actions (Permissions, Share, Presence) */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Voice Chat Control Pill */}
+          {isVoiceActive ? (
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onToggleVoiceMute}
+                className={cn(
+                  "h-8 px-2.5 text-xs gap-1.5 border-slate-700 relative",
+                  isVoiceMuted
+                    ? "bg-rose-950/40 border-rose-500/50 text-rose-300"
+                    : isSpeaking
+                    ? "bg-emerald-950/40 border-emerald-500/50 text-emerald-300 ring-2 ring-emerald-500/30"
+                    : "bg-slate-900 text-slate-300"
+                )}
+                title={isVoiceMuted ? "Unmute Microphone" : "Mute Microphone"}
+              >
+                {isVoiceMuted ? (
+                  <MicOff className="h-3.5 w-3.5 text-rose-400" />
+                ) : (
+                  <Mic className="h-3.5 w-3.5 text-emerald-400" />
+                )}
+                <span className="hidden md:inline">
+                  {isVoiceMuted ? "Muted" : isSpeaking ? "Speaking" : "Voice On"}
+                </span>
+                {isPartnerSpeaking && (
+                  <span className="h-2 w-2 rounded-full bg-pink-400 animate-ping absolute -top-1 -right-1" />
+                )}
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={onToggleVoice}
+                className="h-8 w-8 text-slate-400 hover:text-rose-400"
+                title="Leave Voice Chat"
+              >
+                <Radio className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onToggleVoice}
+              className="h-8 px-2.5 text-xs gap-1.5 border-slate-800 bg-slate-900/80 text-slate-300 hover:bg-slate-800 hover:text-white"
+              title="Start P2P Voice Chat"
+            >
+              <Mic className="h-3.5 w-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">Voice Chat</span>
+            </Button>
+          )}
+
           {/* Permission Mode Pill */}
           <PermissionControls
             permissionMode={permissionMode}

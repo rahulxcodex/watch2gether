@@ -66,6 +66,9 @@ export function ShareModal({
               includeMargin={false}
             />
           </div>
+          <p className="text-xs text-slate-400 text-center">
+            Scan QR code on your mobile device to join instantly
+          </p>
 
           {/* Room Code Badge */}
           <div className="flex items-center gap-2">

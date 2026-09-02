@@ -8,11 +8,12 @@ import { UnifiedPlayerInstance } from "@/components/player/types";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { EmojiReactionCanvas } from "@/components/chat/EmojiReactionCanvas";
 import { ParticipantsList } from "@/components/room/ParticipantsList";
+import { MediaShelf } from "@/components/room/MediaShelf";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useSyncEngine } from "@/hooks/useSyncEngine";
+import { useVoiceChat } from "@/hooks/useVoiceChat";
 import { getOrCreateGuestSession } from "@/lib/guest-session";
 import { getSocket, TypedSocket, disconnectSocket } from "@/lib/socket";
-import { getRoomDetails } from "@/lib/api";
 import {
   UserDTO,
   RoomDTO,
@@ -21,8 +22,10 @@ import {
   ChatMessageDTO,
   ReactionBurstDTO,
   RoomJoinedPayload,
+  QueueItemDTO,
+  PartnerProgressDTO,
 } from "@watch2gether/shared";
-import { MessageSquare, Users, Sparkles, AlertCircle } from "lucide-react";
+import { MessageSquare, Users, ListVideo, AlertCircle } from "lucide-react";
 
 export default function RoomTheaterPage() {
   const params = useParams();
@@ -51,10 +54,29 @@ export default function RoomTheaterPage() {
   const [activeSidebarTab, setActiveSidebarTab] = useState<string>("chat");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // The Shelf / Queue & Partner Progress
+  const [queue, setQueue] = useState<QueueItemDTO[]>([]);
+  const [partnerProgress, setPartnerProgress] = useState<PartnerProgressDTO | null>(null);
+
   const playerRef = useRef<UnifiedPlayerInstance | null>(null);
 
   const isHost = roomDetails.hostId === currentUser.id || !roomDetails.hostId;
   const canControl = roomDetails.permissionMode === "SHARED" || isHost;
+
+  // Initialize WebRTC Voice Chat with Audio Ducking
+  const {
+    isVoiceActive,
+    isMuted: isVoiceMuted,
+    isSpeaking,
+    isPartnerSpeaking,
+    startVoice,
+    stopVoice,
+    toggleMute: toggleVoiceMute,
+  } = useVoiceChat({
+    socket,
+    roomCode,
+    currentUserId: currentUser.id,
+  });
 
   // Initialize Sync Engine
   const {
@@ -71,6 +93,26 @@ export default function RoomTheaterPage() {
     playerRef,
     canControl,
   });
+
+  // Save room to localStorage for 1-click rejoining from homepage
+  useEffect(() => {
+    if (!roomCode) return;
+    try {
+      const stored = localStorage.getItem("wtSavedRoomsV1");
+      const savedList: Array<{ code: string; name: string; lastVisited: number }> = stored
+        ? JSON.parse(stored)
+        : [];
+      const filtered = savedList.filter((r) => r.code !== roomCode);
+      filtered.unshift({
+        code: roomCode,
+        name: roomDetails.name || `Room ${roomCode}`,
+        lastVisited: Date.now(),
+      });
+      localStorage.setItem("wtSavedRoomsV1", JSON.stringify(filtered.slice(0, 10)));
+    } catch (e) {
+      // Ignore write error
+    }
+  }, [roomCode, roomDetails.name]);
 
   // Connect to Socket and Join Room
   useEffect(() => {
@@ -102,6 +144,7 @@ export default function RoomTheaterPage() {
         const { room, users, playbackState } = response.data;
         setRoomDetails(room);
         setActiveUsers(users);
+        if (room.queue) setQueue(room.queue);
         if (playbackState) {
           handleIncomingMediaSync(playbackState);
         }
@@ -112,6 +155,7 @@ export default function RoomTheaterPage() {
     const onRoomJoined = (payload: RoomJoinedPayload) => {
       setRoomDetails(payload.room);
       setActiveUsers(payload.users || []);
+      if (payload.room.queue) setQueue(payload.room.queue);
       if (payload.playbackState) {
         handleIncomingMediaSync(payload.playbackState);
       }
@@ -151,21 +195,7 @@ export default function RoomTheaterPage() {
       ]);
     };
 
-    const onPermissionUpdated = (payload: { permissionMode: PermissionMode }) => {
-      setRoomDetails((prev) => ({ ...prev, permissionMode: payload.permissionMode }));
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: "sys_" + Date.now(),
-          sender: currentUser,
-          text: `Playback permission changed to ${payload.permissionMode === "HOST_ONLY" ? "Host Only" : "Shared Control"}`,
-          timestamp: Date.now(),
-          system: true,
-        },
-      ]);
-    };
-
-    const onMediaChanged = (payload: { mediaUrl: string; mediaType: MediaType; updatedBy: string }) => {
+    const onMediaChanged = (payload: { mediaUrl: string; mediaType: MediaType; name?: string }) => {
       setRoomDetails((prev) => ({
         ...prev,
         mediaUrl: payload.mediaUrl,
@@ -175,12 +205,16 @@ export default function RoomTheaterPage() {
         ...prev,
         {
           id: "sys_" + Date.now(),
-          sender: currentUser,
-          text: `Video source updated to ${payload.mediaType} video`,
+          sender: { id: "system", name: "System", isGuest: false },
+          text: `Media changed to ${payload.name || payload.mediaUrl}`,
           timestamp: Date.now(),
           system: true,
         },
       ]);
+    };
+
+    const onPermissionUpdated = (payload: { permissionMode: PermissionMode }) => {
+      setRoomDetails((prev) => ({ ...prev, permissionMode: payload.permissionMode }));
     };
 
     const onChatMessage = (msg: ChatMessageDTO) => {
@@ -188,96 +222,93 @@ export default function RoomTheaterPage() {
     };
 
     const onReactionBurst = (burst: ReactionBurstDTO) => {
-      setReactionBursts((prev) => [...prev, burst]);
+      setReactionBursts((prev) => [...prev.slice(-20), burst]);
     };
 
-    const onPermissionDenied = (err: { message: string }) => {
-      setErrorMessage(err.message);
-      setTimeout(() => setErrorMessage(null), 4000);
+    const onQueueUpdated = (payload: { queue: QueueItemDTO[] }) => {
+      if (payload.queue) setQueue(payload.queue);
+    };
+
+    const onPartnerProgress = (payload: PartnerProgressDTO) => {
+      if (payload.userId !== currentUser.id) {
+        setPartnerProgress(payload);
+      }
     };
 
     sock.on("room:joined", onRoomJoined);
-    sock.on("room:member_joined", onUserJoined);
     sock.on("room:user_joined", onUserJoined);
-    sock.on("room:member_left", onUserLeft);
+    sock.on("room:member_joined", onUserJoined);
     sock.on("room:user_left", onUserLeft);
-    sock.on("room:permission_updated", onPermissionUpdated);
+    sock.on("room:member_left", onUserLeft);
     sock.on("room:media_changed", onMediaChanged);
+    sock.on("room:permission_updated", onPermissionUpdated);
     sock.on("chat:message", onChatMessage);
     sock.on("reaction:burst", onReactionBurst);
-    sock.on("permission:denied", onPermissionDenied);
-
-    // Initial system greeting message
-    setMessages([
-      {
-        id: "init_msg",
-        sender: guestUser,
-        text: `Welcome to ${roomCode}! Share the invite link with friends to watch together in sync.`,
-        timestamp: Date.now(),
-        system: true,
-      },
-    ]);
+    sock.on("queue:updated" as any, onQueueUpdated);
+    sock.on("media:progress_update" as any, onPartnerProgress);
 
     return () => {
-      sock.emit("room:leave", { roomCode });
       sock.off("room:joined", onRoomJoined);
-      sock.off("room:member_joined", onUserJoined);
       sock.off("room:user_joined", onUserJoined);
-      sock.off("room:member_left", onUserLeft);
+      sock.off("room:member_joined", onUserJoined);
       sock.off("room:user_left", onUserLeft);
-      sock.off("room:permission_updated", onPermissionUpdated);
+      sock.off("room:member_left", onUserLeft);
       sock.off("room:media_changed", onMediaChanged);
+      sock.off("room:permission_updated", onPermissionUpdated);
       sock.off("chat:message", onChatMessage);
       sock.off("reaction:burst", onReactionBurst);
-      sock.off("permission:denied", onPermissionDenied);
+      sock.off("queue:updated" as any, onQueueUpdated);
+      sock.off("media:progress_update" as any, onPartnerProgress);
     };
-  }, [roomCode, handleIncomingMediaSync]);
+  }, [roomCode, currentUser.id, handleIncomingMediaSync]);
 
-  // Handle chat sending
+  // Periodic playhead progress reporter for Dual Scrubber (every 1 second)
+  useEffect(() => {
+    if (!socket || !socket.connected) return;
+
+    const interval = setInterval(() => {
+      const player = playerRef.current;
+      if (!player) return;
+
+      const currentTime = player.getCurrentTime();
+      const duration = player.getDuration();
+      socket.emit("media:progress_report" as any, {
+        currentTime,
+        duration,
+        isStalled: false,
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [socket]);
+
+  // Handle outgoing chat message
   const handleSendMessage = useCallback(
     (text: string) => {
-      const newMsg: ChatMessageDTO = {
-        id: "msg_" + Math.random().toString(36).substring(2, 9),
+      if (!socket || !socket.connected || !text.trim()) return;
+      socket.emit("chat:send", {
         roomCode,
-        sender: currentUser,
-        text,
-        timestamp: Date.now(),
-      };
-      // Optimistic update
-      setMessages((prev) => [...prev, newMsg]);
-
-      if (socket && socket.connected) {
-        socket.emit("chat:send", { roomCode, text });
-      }
+        text: text.trim(),
+      });
     },
-    [socket, roomCode, currentUser]
+    [socket, roomCode]
   );
 
-  // Handle emoji reaction
+  // Handle outgoing emoji reaction
   const handleSendReaction = useCallback(
     (emoji: string) => {
-      const burst: ReactionBurstDTO = {
-        id: "burst_" + Date.now(),
+      if (!socket || !socket.connected) return;
+      socket.emit("reaction:send", {
         roomCode,
         emoji,
-        senderId: currentUser.id,
-        senderName: currentUser.name,
-        timestamp: Date.now(),
-        x: 0.6 + Math.random() * 0.3,
-      };
-      // Local immediate particle burst
-      setReactionBursts((prev) => [...prev, burst]);
-
-      if (socket && socket.connected) {
-        socket.emit("reaction:send", { roomCode, emoji, x: burst.x });
-      }
+      });
     },
-    [socket, roomCode, currentUser]
+    [socket, roomCode]
   );
 
-  // Handle media source change (Host or Shared)
+  // Handle media source swap
   const handleChangeMedia = useCallback(
-    (newUrl: string, newType: MediaType) => {
+    (newUrl: string, newType: MediaType, title?: string) => {
       if (!canControl) return;
       setRoomDetails((prev) => ({ ...prev, mediaUrl: newUrl, mediaType: newType }));
       if (socket && socket.connected) {
@@ -285,6 +316,37 @@ export default function RoomTheaterPage() {
       }
     },
     [socket, roomCode, canControl]
+  );
+
+  // Handle queue actions
+  const handleAddToQueue = useCallback(
+    (item: Omit<QueueItemDTO, "id" | "createdAt">) => {
+      const fullItem: QueueItemDTO = {
+        ...item,
+        id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        createdAt: Date.now(),
+      };
+      setQueue((prev) => [...prev, fullItem]);
+      socket?.emit("queue:add" as any, { item: fullItem });
+    },
+    [socket]
+  );
+
+  const handleRemoveFromQueue = useCallback(
+    (itemId: string) => {
+      setQueue((prev) => prev.filter((i) => i.id !== itemId));
+      socket?.emit("queue:remove" as any, { itemId });
+    },
+    [socket]
+  );
+
+  // Handle Local File Selection (ObjectURL without uploading)
+  const handleSelectLocalFile = useCallback(
+    (file: File) => {
+      const blobUrl = URL.createObjectURL(file);
+      handleChangeMedia(blobUrl, "LOCAL_FILE", file.name);
+    },
+    [handleChangeMedia]
   );
 
   // Handle permission toggle (Host only)
@@ -310,6 +372,12 @@ export default function RoomTheaterPage() {
         onTogglePermission={handleTogglePermission}
         syncStatus={syncStatus}
         activeUsers={activeUsers}
+        isVoiceActive={isVoiceActive}
+        isVoiceMuted={isVoiceMuted}
+        isSpeaking={isSpeaking}
+        isPartnerSpeaking={isPartnerSpeaking}
+        onToggleVoice={() => (isVoiceActive ? stopVoice() : startVoice())}
+        onToggleVoiceMute={toggleVoiceMute}
       />
 
       {/* Permission Denied Banner if applicable */}
@@ -325,13 +393,16 @@ export default function RoomTheaterPage() {
         {/* Left Column (70% on Desktop): Unified Video Theater */}
         <section className="lg:col-span-8 flex flex-col justify-center relative">
           <div className="relative w-full overflow-hidden rounded-2xl">
-            {/* Unified Video Player */}
+            {/* Unified Video Player with DualScrubber, Subtitles, and Audio Ducking */}
             <VideoPlayer
               ref={playerRef}
               mediaUrl={roomDetails.mediaUrl}
               mediaType={roomDetails.mediaType}
+              title={roomDetails.name}
               canControl={canControl}
               disabledReason="Playback controls are locked to Room Host."
+              partnerProgress={partnerProgress}
+              isDucked={isPartnerSpeaking}
               onPlay={(time) => emitPlay(time)}
               onPause={(time) => emitPause(time)}
               onSeek={(time) => emitSeek(time)}
@@ -344,19 +415,23 @@ export default function RoomTheaterPage() {
           </div>
         </section>
 
-        {/* Right Column (30% on Desktop): Real-time Chat & Participants Sidebar */}
+        {/* Right Column (30% on Desktop): Sidebar (Chat, The Shelf, Participants) */}
         <aside className="lg:col-span-4 flex flex-col h-full min-h-[420px] max-h-[750px]">
           <Tabs
             value={activeSidebarTab}
             onValueChange={setActiveSidebarTab}
             className="flex flex-col h-full"
           >
-            <TabsList className="grid grid-cols-2 mb-2 bg-slate-900 border border-slate-800">
-              <TabsTrigger value="chat" className="gap-2 text-xs">
+            <TabsList className="grid grid-cols-3 mb-2 bg-slate-900 border border-slate-800">
+              <TabsTrigger value="chat" className="gap-1.5 text-xs">
                 <MessageSquare className="h-3.5 w-3.5" />
                 <span>Chat</span>
               </TabsTrigger>
-              <TabsTrigger value="participants" className="gap-2 text-xs">
+              <TabsTrigger value="shelf" className="gap-1.5 text-xs">
+                <ListVideo className="h-3.5 w-3.5" />
+                <span>Shelf {queue.length > 0 && `(${queue.length})`}</span>
+              </TabsTrigger>
+              <TabsTrigger value="participants" className="gap-1.5 text-xs">
                 <Users className="h-3.5 w-3.5" />
                 <span>Members ({activeUsers.length})</span>
               </TabsTrigger>
@@ -369,6 +444,18 @@ export default function RoomTheaterPage() {
                 onSendMessage={handleSendMessage}
                 onSendReaction={handleSendReaction}
                 className="h-full"
+              />
+            </TabsContent>
+
+            <TabsContent value="shelf" className="flex-1 min-h-0 mt-0 bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+              <MediaShelf
+                queue={queue}
+                currentMediaUrl={roomDetails.mediaUrl}
+                canControl={canControl}
+                onAddToQueue={handleAddToQueue}
+                onRemoveFromQueue={handleRemoveFromQueue}
+                onSwitchMedia={handleChangeMedia}
+                onSelectLocalFile={handleSelectLocalFile}
               />
             </TabsContent>
 

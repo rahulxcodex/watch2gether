@@ -45,6 +45,82 @@ export function initSocketIO(
     registerSyncHandlers(io, socket, roomStore, fastify.log);
     registerChatHandlers(io, socket, roomStore, fastify.log);
 
+    // WebRTC Signaling Relay
+    socket.on('signal:offer', (payload: any) => {
+      const roomCode = socket.data.roomCode || payload?.roomCode;
+      if (!roomCode) return;
+      socket.to(roomCode).emit('signal:offer', {
+        ...payload,
+        fromUserId: socket.data.userId,
+      });
+    });
+
+    socket.on('signal:answer', (payload: any) => {
+      const roomCode = socket.data.roomCode || payload?.roomCode;
+      if (!roomCode) return;
+      socket.to(roomCode).emit('signal:answer', {
+        ...payload,
+        fromUserId: socket.data.userId,
+      });
+    });
+
+    socket.on('signal:ice', (payload: any) => {
+      const roomCode = socket.data.roomCode || payload?.roomCode;
+      if (!roomCode) return;
+      socket.to(roomCode).emit('signal:ice', {
+        ...payload,
+        fromUserId: socket.data.userId,
+      });
+    });
+
+    socket.on('voice:speaking', (payload: { isSpeaking: boolean }) => {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode) return;
+      socket.to(roomCode).emit('voice:speaking', {
+        userId: socket.data.userId,
+        isSpeaking: payload.isSpeaking,
+      });
+    });
+
+    // Room Queue / Shelf
+    socket.on('queue:add', async (payload: { item: any }) => {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode || !payload?.item) return;
+      const state = await roomStore.addToQueue(roomCode, {
+        ...payload.item,
+        addedBy: socket.data.userId,
+        addedByName: socket.data.userName,
+        createdAt: Date.now(),
+      });
+      if (state) {
+        io.to(roomCode).emit('queue:updated', { queue: state.queue });
+      }
+    });
+
+    socket.on('queue:remove', async (payload: { itemId: string }) => {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode || !payload?.itemId) return;
+      const state = await roomStore.removeFromQueue(roomCode, payload.itemId);
+      if (state) {
+        io.to(roomCode).emit('queue:updated', { queue: state.queue });
+      }
+    });
+
+    // Dual Playhead Scrubber progress reporting
+    socket.on('media:progress_report', (payload: { currentTime: number; duration?: number; isStalled?: boolean }) => {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode) return;
+      socket.to(roomCode).emit('media:progress_update', {
+        userId: socket.data.userId,
+        name: socket.data.userName,
+        color: socket.data.avatarColor,
+        currentTime: payload.currentTime,
+        duration: payload.duration,
+        isStalled: payload.isStalled,
+        updatedAt: Date.now(),
+      });
+    });
+
     socket.on('disconnect', async () => {
       fastify.log.debug({ socketId: socket.id }, 'Socket disconnected');
       const roomCode = socket.data.roomCode;
