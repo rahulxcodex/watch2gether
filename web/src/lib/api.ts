@@ -18,7 +18,18 @@ export async function createRoom(
     });
 
     if (res.ok) {
-      return (await res.json()) as CreateRoomResponseDTO;
+      const roomData = (await res.json()) as CreateRoomResponseDTO;
+      fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomCode: roomData.roomCode,
+          name: roomData.name,
+          mediaUrl: roomData.mediaUrl,
+          mediaType: roomData.mediaType,
+        }),
+      }).catch(() => {});
+      return roomData;
     }
   } catch (err) {
     console.warn("API createRoom request failed, fallback to local generation:", err);
@@ -26,7 +37,7 @@ export async function createRoom(
 
   // Graceful fallback for offline / mock mode
   const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-  return {
+  const fallbackRoom: CreateRoomResponseDTO = {
     id: "room_" + randomCode.toLowerCase(),
     roomCode: randomCode,
     name: payload.name || `Watch Party ${randomCode}`,
@@ -39,6 +50,19 @@ export async function createRoom(
     version: 1,
     createdAt: Date.now(),
   };
+
+  fetch("/api/admin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      roomCode: fallbackRoom.roomCode,
+      name: fallbackRoom.name,
+      mediaUrl: fallbackRoom.mediaUrl,
+      mediaType: fallbackRoom.mediaType,
+    }),
+  }).catch(() => {});
+
+  return fallbackRoom;
 }
 
 export async function getRoomDetails(roomCode: string): Promise<RoomDetailsDTO | null> {

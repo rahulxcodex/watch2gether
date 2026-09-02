@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import Hls from "hls.js";
 import { UnifiedPlayerInstance, PlayerEvents } from "./types";
 
 interface HTML5PlayerProps extends PlayerEvents {
@@ -26,6 +27,7 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
     ref
   ) => {
     const videoRef = useRef<HTMLVideoElement>(null);
+    const hlsRef = useRef<Hls | null>(null);
     const isSeekingRef = useRef(false);
 
     const playerApi: UnifiedPlayerInstance = {
@@ -69,25 +71,87 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       },
       getCurrentTime: () => videoRef.current?.currentTime || 0,
       getDuration: () => videoRef.current?.duration || 0,
-      isPaused: () => videoRef.current ? videoRef.current.paused : true,
+      isPaused: () => (videoRef.current ? videoRef.current.paused : true),
       getPlaybackRate: () => videoRef.current?.playbackRate || 1.0,
     };
 
     useImperativeHandle(ref, () => playerApi, []);
 
+    // Setup video source (Native or HLS)
     useEffect(() => {
-      if (videoRef.current) {
-        onReady?.(playerApi);
+      const video = videoRef.current;
+      if (!video || !src) return;
+
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
+
+      const isHls = /\.m3u8(?:[?#]|$)/i.test(src) || src.includes(".m3u8");
+      const proxiedUrl = isHls ? `/api/proxy?url=${encodeURIComponent(src)}` : src;
+
+      if (isHls) {
+        // 1. Check native Safari HLS support
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = proxiedUrl;
+          video.load();
+        } else if (Hls.isSupported()) {
+          // 2. Cross-browser Hls.js demuxer
+          const hls = new Hls({
+            maxBufferLength: 60,
+            maxMaxBufferLength: 180,
+            backBufferLength: 60,
+            enableWorker: true,
+          });
+
+          hlsRef.current = hls;
+
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            onReady?.(playerApi);
+          });
+
+          hls.on(Hls.Events.ERROR, (_evt, data) => {
+            if (data?.fatal) {
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                hls.startLoad();
+              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                hls.recoverMediaError();
+              } else {
+                hls.destroy();
+                hlsRef.current = null;
+                onError?.("HLS stream playback failed.");
+              }
+            }
+          });
+
+          hls.loadSource(proxiedUrl);
+          hls.attachMedia(video);
+        } else {
+          onError?.("Your browser does not support HLS streaming.");
+        }
+      } else {
+        // Standard MP4 or direct video URL
+        video.src = src;
+        video.load();
+      }
+
+      onReady?.(playerApi);
+
+      return () => {
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        }
+      };
     }, [src]);
 
     return (
       <video
         ref={videoRef}
-        src={src}
         className={className}
         playsInline
         preload="metadata"
+        crossOrigin="anonymous"
         onPlay={() => {
           if (!isSeekingRef.current) onPlay?.(videoRef.current?.currentTime || 0);
         }}
@@ -108,7 +172,11 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         onWaiting={() => onBuffering?.(true)}
         onPlaying={() => onBuffering?.(false)}
         onEnded={() => onEnded?.()}
-        onError={(e) => onError?.(e.currentTarget.error?.message || "Video load error")}
+        onError={(e) => {
+          // If video failed and it's an HLS stream that hasn't tried proxy yet
+          const errMsg = e.currentTarget.error?.message || "Video load error";
+          onError?.(errMsg);
+        }}
       />
     );
   }

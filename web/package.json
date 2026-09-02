@@ -25,6 +25,7 @@
     "@watch2gether/shared": "*",
     "clsx": "^2.1.1",
     "framer-motion": "^11.3.28",
+    "hls.js": "^1.7.2",
     "lucide-react": "^0.428.0",
     "next": "^14.2.5",
     "qrcode.react": "^4.0.1",

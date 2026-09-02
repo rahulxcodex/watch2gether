@@ -213,6 +213,40 @@ export function AddMediaModal({
     }
   };
 
+  const handleSaveTitleOnly = () => {
+    if (!seriesName.trim()) return;
+    const resolvedCode = isMovie
+      ? "Movie"
+      : `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
+
+    const title: LibraryTitle = {
+      id: `title_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: seriesName.trim(),
+      mediaType: isMovie ? "movie" : "series",
+      imdbId: imdbId || null,
+      imdbUrl: imdbId ? `https://www.imdb.com/title/${imdbId}/` : null,
+      summary: "",
+      genres: [],
+      episodes: videoUrl.trim()
+        ? [
+            {
+              id: `ep_${Date.now()}`,
+              title: isMovie ? seriesName.trim() : `${resolvedCode} · Episode ${episodeNumber}`,
+              url: videoUrl.trim(),
+              seasonNumber: isMovie ? null : seasonNumber,
+              episodeNumber: isMovie ? null : episodeNumber,
+              episodeCode: resolvedCode,
+              subtitleUrl: subtitleUrl.trim() || undefined,
+            },
+          ]
+        : [],
+      updatedAt: Date.now(),
+    };
+
+    onSaveTitle(title);
+    onClose();
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg bg-slate-900 border-slate-800 text-white p-6 max-h-[90vh] overflow-y-auto">
@@ -367,12 +401,20 @@ export function AddMediaModal({
             </div>
           </div>
 
-          <DialogFooter className="pt-4">
+          <DialogFooter className="pt-4 flex flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSaveTitleOnly}
+              className="w-full sm:w-1/2 text-xs border-slate-700 bg-slate-900/60 hover:bg-slate-800 text-slate-300 h-10"
+            >
+              Save Title, Add Link Later
+            </Button>
             <Button
               type="submit"
               variant="glow"
               disabled={analyzing}
-              className="w-full text-xs font-semibold h-10 shadow-indigo-500/20"
+              className="w-full sm:w-1/2 text-xs font-semibold h-10 shadow-indigo-500/20"
             >
               {analyzing ? (
                 <>

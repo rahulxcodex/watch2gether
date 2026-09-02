@@ -24,6 +24,7 @@ import {
   Search,
   Plus,
   Star,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,9 +43,11 @@ import { ShimmerButton } from "@/components/visual/ShimmerButton";
 import { createRoom } from "@/lib/api";
 import { MediaType, PermissionMode } from "@watch2gether/shared";
 import { formatTime } from "@/lib/utils";
+import Link from "next/link";
 import { CatalogueModal } from "@/components/library/CatalogueModal";
 import { AddMediaModal } from "@/components/library/AddMediaModal";
 import { LibraryDetailModal } from "@/components/library/LibraryDetailModal";
+import { AuthModal } from "@/components/auth/AuthModal";
 import { LibraryTitle, LibraryEpisode } from "@/components/library/types";
 
 interface ContinueWatchingItem {
@@ -121,6 +124,10 @@ export default function HomePage() {
   const [savedRooms, setSavedRooms] = useState<SavedRoomItem[]>([]);
   const [myLibrary, setMyLibrary] = useState<LibraryTitle[]>([]);
 
+  // User Authentication & Cloud State
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+
   // Modals state
   const [isCatalogueOpen, setIsCatalogueOpen] = useState(false);
   const [isAddMediaOpen, setIsAddMediaOpen] = useState(false);
@@ -149,6 +156,30 @@ export default function HomePage() {
       if (storedLib) {
         setMyLibrary(JSON.parse(storedLib));
       }
+
+      // Check current session & sync cloud library
+      fetch("/api/auth/me")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.user) {
+            setCurrentUser(data.user);
+            fetch("/api/library")
+              .then((res) => (res.ok ? res.json() : null))
+              .then((libData) => {
+                if (libData?.library?.length) {
+                  setMyLibrary((prev) => {
+                    const map = new Map();
+                    prev.forEach((p) => map.set(p.id || p.name, p));
+                    libData.library.forEach((r: any) => map.set(r.id || r.name, r));
+                    const merged = Array.from(map.values());
+                    try { localStorage.setItem("wtLibraryV1", JSON.stringify(merged)); } catch {}
+                    return merged;
+                  });
+                }
+              });
+          }
+        })
+        .catch(() => {});
     } catch (e) {
       // Ignore read error
     }
@@ -201,12 +232,57 @@ export default function HomePage() {
     setIsAddMediaOpen(true);
   };
 
+  const syncCloudLibrary = (lib: LibraryTitle[]) => {
+    try {
+      localStorage.setItem("wtLibraryV1", JSON.stringify(lib));
+      fetch("/api/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ library: lib }),
+      }).catch(() => {});
+    } catch {}
+  };
+
   const handleSaveMediaTitle = (title: LibraryTitle) => {
     const updated = [...myLibrary.filter((t) => t.id !== title.id && t.name !== title.name), title];
     setMyLibrary(updated);
+    syncCloudLibrary(updated);
+  };
+
+  const handleUpdateTitle = (updatedTitle: LibraryTitle) => {
+    const updated = myLibrary.map((t) => (t.id === updatedTitle.id ? updatedTitle : t));
+    setMyLibrary(updated);
+    setSelectedDetailTitle(updatedTitle);
+    syncCloudLibrary(updated);
+  };
+
+  const handleDeleteTitle = (titleId: string) => {
+    const updated = myLibrary.filter((t) => t.id !== titleId);
+    setMyLibrary(updated);
+    syncCloudLibrary(updated);
+  };
+
+  const handleAuthSuccess = (user: any) => {
+    setCurrentUser(user);
+    if (user?.library?.length) {
+      setMyLibrary((prev) => {
+        const map = new Map();
+        prev.forEach((p) => map.set(p.id || p.name, p));
+        user.library.forEach((r: any) => map.set(r.id || r.name, r));
+        const merged = Array.from(map.values());
+        syncCloudLibrary(merged);
+        return merged;
+      });
+    } else if (myLibrary.length) {
+      syncCloudLibrary(myLibrary);
+    }
+  };
+
+  const handleLogout = async () => {
     try {
-      localStorage.setItem("wtLibraryV1", JSON.stringify(updated));
+      await fetch("/api/auth/me", { method: "POST" });
     } catch {}
+    setCurrentUser(null);
   };
 
   const handlePlayLibraryEpisode = async (episode: LibraryEpisode, title: LibraryTitle) => {
@@ -243,6 +319,18 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
+            <Link href="/admin">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 text-xs text-slate-400 hover:text-white"
+                title="Admin Command Center"
+              >
+                <ShieldCheck className="h-3.5 w-3.5 text-purple-400" />
+                <span className="hidden sm:inline">Admin</span>
+              </Button>
+            </Link>
+
             <Button
               variant="outline"
               size="sm"
@@ -250,8 +338,47 @@ export default function HomePage() {
               className="gap-1.5 text-xs border-slate-700 bg-slate-900/60 hover:bg-slate-800 text-slate-200"
             >
               <Search className="h-3.5 w-3.5 text-indigo-400" />
-              <span>Browse Catalogue</span>
+              <span>Browse</span>
             </Button>
+
+            {currentUser ? (
+              <div className="flex items-center gap-2 pl-1 border-l border-slate-800">
+                {currentUser.avatarUrl ? (
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt=""
+                    className="h-7 w-7 rounded-full object-cover border border-indigo-500/40"
+                  />
+                ) : (
+                  <div className="h-7 w-7 rounded-full bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-[11px] font-bold text-indigo-300">
+                    {currentUser.name?.[0]?.toUpperCase() || "U"}
+                  </div>
+                )}
+                <span className="hidden md:inline text-xs font-medium text-slate-300 max-w-[120px] truncate">
+                  {currentUser.name}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleLogout}
+                  className="h-7 px-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  title="Log out"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsAuthOpen(true)}
+                className="gap-1.5 text-xs text-teal-400 hover:text-teal-300 hover:bg-teal-500/10 border border-teal-500/30"
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span>Log In</span>
+              </Button>
+            )}
+
             <Button
               variant="glow"
               size="sm"
@@ -702,12 +829,25 @@ export default function HomePage() {
         initialImdbId={selectedCatalogTitle?.imdbId || ""}
       />
 
-      {/* Library Detail Modal */}
+      {/* Library Detail Modal with Full Editing & Delete */}
       <LibraryDetailModal
         isOpen={!!selectedDetailTitle}
         onClose={() => setSelectedDetailTitle(null)}
         title={selectedDetailTitle}
         onPlayEpisode={(ep) => selectedDetailTitle && handlePlayLibraryEpisode(ep, selectedDetailTitle)}
+        onUpdateTitle={handleUpdateTitle}
+        onDeleteTitle={handleDeleteTitle}
+        onAddEpisode={(t) => {
+          setSelectedCatalogTitle(t);
+          setIsAddMediaOpen(true);
+        }}
+      />
+
+      {/* User Login & Cloud Sync Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
       />
     </main>
   );
