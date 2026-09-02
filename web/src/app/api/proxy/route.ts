@@ -143,6 +143,7 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
           .join("\n");
 
         responseHeaders.delete("content-length");
+        responseHeaders.set("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         responseHeaders.set("content-type", "application/vnd.apple.mpegurl");
         return new NextResponse(rewritten, {
           status: upstream.status,
