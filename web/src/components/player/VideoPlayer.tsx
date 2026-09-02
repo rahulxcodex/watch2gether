@@ -10,9 +10,13 @@ import React, {
 } from "react";
 import { HTML5Player } from "./HTML5Player";
 import { YouTubePlayer } from "./YouTubePlayer";
+import { ScreenSharePlayer } from "./ScreenSharePlayer";
 import { PlayerControls } from "./PlayerControls";
 import { SubtitleOverlay, SubtitleStyleOptions } from "./SubtitleOverlay";
 import { SubtitleSettingsModal } from "./SubtitleSettingsModal";
+import { PlaybackSettingsModal, PlaybackSettings } from "./PlaybackSettingsModal";
+import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
+import { useScreenShare } from "@/hooks/useScreenShare";
 import { AmbientGlow } from "@/components/visual/AmbientGlow";
 import { UnifiedPlayerInstance, VideoPlayerProps } from "./types";
 import { cn, formatTime } from "@/lib/utils";
@@ -41,6 +45,9 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       onReady,
       onError,
       onChangeMedia,
+      onToggleTheater,
+      isTheaterMode = false,
+      onScreenShareChange,
       className,
     },
     ref
@@ -54,10 +61,59 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
     const [volume, setVolumeState] = useState(0.8);
     const [isMuted, setIsMuted] = useState(false);
     const [playbackRate, setPlaybackRateState] = useState(1.0);
+    const [intendedPlaybackRate, setIntendedPlaybackRate] = useState(1.0);
     const [isBuffering, setIsBuffering] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [showControls, setShowControls] = useState(true);
     const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Playback Settings State
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+    const [playbackSettings, setPlaybackSettings] = useState<PlaybackSettings>({
+      quality: "auto",
+      audioBoost: 1.0,
+      audioDelayMs: 0,
+      smartSyncMode: "adaptive",
+      autoPlayNext: true,
+    });
+
+    // Screen Sharing Hook
+    const {
+      isSharing: isScreenSharing,
+      stream: screenStream,
+      startScreenShare,
+      stopScreenShare,
+    } = useScreenShare(() => {
+      onScreenShareChange?.(false);
+    });
+
+    const handleToggleScreenShare = async () => {
+      if (isScreenSharing) {
+        stopScreenShare();
+        onScreenShareChange?.(false);
+      } else {
+        const stream = await startScreenShare();
+        if (stream) {
+          onScreenShareChange?.(true);
+        }
+      }
+    };
+
+    const handleTriggerPiP = async () => {
+      try {
+        const video = containerRef.current?.querySelector("video");
+        if (video && document.pictureInPictureEnabled) {
+          if (document.pictureInPictureElement) {
+            await document.exitPictureInPicture();
+          } else {
+            await video.requestPictureInPicture();
+          }
+        }
+      } catch (err) {
+        console.warn("PiP toggle error:", err);
+      }
+    };
 
     // Subtitles State
     const [isSubtitlesOpen, setIsSubtitlesOpen] = useState(false);
@@ -148,6 +204,9 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       },
       setPlaybackRate: async (rate: number) => {
         setPlaybackRateState(rate);
+        if ([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].includes(rate)) {
+          setIntendedPlaybackRate(rate);
+        }
         if (activePlayerRef.current) {
           await activePlayerRef.current.setPlaybackRate(rate);
         }
@@ -155,7 +214,8 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       setVolume: (vol: number) => {
         setVolumeState(vol);
         if (activePlayerRef.current) {
-          activePlayerRef.current.setVolume(isDucked ? vol * 0.25 : vol);
+          const effective = (isDucked ? vol * 0.25 : vol) * (playbackSettings.audioBoost || 1.0);
+          activePlayerRef.current.setVolume(Math.min(1.0, effective));
         }
       },
       setMuted: (muted: boolean) => {
@@ -220,6 +280,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
 
     const handleRateChange = async (rate: number) => {
       if (!canControl) return;
+      setIntendedPlaybackRate(rate);
       await unifiedApi.setPlaybackRate(rate);
       onRateChange?.(rate);
     };
@@ -328,6 +389,25 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
             e.preventDefault();
             onSnapSync?.();
             break;
+          case "t":
+          case "T":
+            e.preventDefault();
+            onToggleTheater?.();
+            break;
+          case "p":
+          case "P":
+            e.preventDefault();
+            handleTriggerPiP();
+            break;
+          case "d":
+          case "D":
+            e.preventDefault();
+            handleToggleScreenShare();
+            break;
+          case "?":
+            e.preventDefault();
+            setIsShortcutsOpen((prev) => !prev);
+            break;
           default:
             break;
         }
@@ -400,9 +480,17 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
         {/* Ambient Backlight Glow */}
         <AmbientGlow isPlaying={isPlaying} />
 
-        {/* Media Adapter Component (YouTube, HTML5, or Local File) */}
+        {/* Media Adapter Component (Screen Share, YouTube, or HTML5/HLS) */}
         <div className="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden">
-          {mediaType === "YOUTUBE" ? (
+          {isScreenSharing && screenStream ? (
+            <ScreenSharePlayer
+              stream={screenStream}
+              className="w-full h-full object-contain"
+              onStopShare={handleToggleScreenShare}
+              onReady={handlePlayerReady}
+              onError={onError}
+            />
+          ) : mediaType === "YOUTUBE" ? (
             <YouTubePlayer
               videoUrl={mediaUrl}
               className="w-full h-full"
@@ -420,7 +508,10 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
               }}
               onRateChange={(rate) => {
                 setPlaybackRateState(rate);
-                onRateChange?.(rate);
+                if ([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].includes(rate)) {
+                  setIntendedPlaybackRate(rate);
+                  onRateChange?.(rate);
+                }
               }}
               onTimeUpdate={(time, dur) => {
                 setCurrentTime(time);
@@ -456,7 +547,10 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
               }}
               onRateChange={(rate) => {
                 setPlaybackRateState(rate);
-                onRateChange?.(rate);
+                if ([0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].includes(rate)) {
+                  setIntendedPlaybackRate(rate);
+                  onRateChange?.(rate);
+                }
               }}
               onTimeUpdate={(time, dur) => {
                 setCurrentTime(time);
@@ -497,7 +591,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
           </div>
         )}
 
-        {/* Custom Subtitles Overlay */}
+        {/* Dynamic Subtitle Overlay with Custom Offsets & Styling */}
         <SubtitleOverlay
           rawText={subtitleText}
           currentTime={currentTime}
@@ -538,9 +632,9 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
           </div>
         )}
 
-        {/* Buffering Spinner */}
+        {/* Buffering Spinner Indicator */}
         {isBuffering && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
             <div className="flex flex-col items-center gap-2">
               <Loader2 className="h-10 w-10 animate-spin text-indigo-400" />
               <span className="text-xs font-medium text-slate-300">Buffering...</span>
@@ -561,7 +655,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
             duration={duration}
             volume={volume}
             isMuted={isMuted}
-            playbackRate={playbackRate}
+            playbackRate={intendedPlaybackRate}
             isFullscreen={isFullscreen}
             canControl={canControl}
             disabledReason={disabledReason}
@@ -577,8 +671,35 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
             subtitlesActive={subtitlesEnabled && !!subtitleText}
             currentMediaUrl={mediaUrl}
             onSendReaction={onSendReaction}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onToggleScreenShare={handleToggleScreenShare}
+            isScreenSharing={isScreenSharing}
+            onOpenShortcuts={() => setIsShortcutsOpen(true)}
+            onToggleTheater={onToggleTheater}
+            isTheaterMode={isTheaterMode}
+            onTriggerPiP={handleTriggerPiP}
           />
         </div>
+
+        {/* Playback Settings Modal */}
+        <PlaybackSettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          settings={playbackSettings}
+          onUpdateSettings={(newSettings) =>
+            setPlaybackSettings((prev) => ({ ...prev, ...newSettings }))
+          }
+          onTriggerPiP={handleTriggerPiP}
+          onToggleTheater={onToggleTheater}
+          isTheaterMode={isTheaterMode}
+          supportsPiP={typeof document !== "undefined" && !!document.pictureInPictureEnabled}
+        />
+
+        {/* Keyboard Shortcuts Guide Modal */}
+        <KeyboardShortcutsModal
+          isOpen={isShortcutsOpen}
+          onClose={() => setIsShortcutsOpen(false)}
+        />
 
         {/* Subtitle Settings Modal */}
         <SubtitleSettingsModal

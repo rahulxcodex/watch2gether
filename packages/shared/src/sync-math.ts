@@ -132,7 +132,8 @@ export function evaluateDriftAction(
   if (absDriftMs <= 1000) {
     // If client is behind (drift < 0), speed up slightly (1.08x)
     // If client is ahead (drift > 0), slow down slightly (0.92x)
-    const targetRate = driftSeconds < 0 ? 1.08 : 0.92;
+    const factor = driftSeconds < 0 ? 1.08 : 0.92;
+    const targetRate = Number((currentPlaybackRate * factor).toFixed(2));
     return { type: 'RATE_ADJUST', targetRate, driftMs };
   }
 

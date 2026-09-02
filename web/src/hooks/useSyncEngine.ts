@@ -181,12 +181,13 @@ export function useSyncEngine({
       // If playing, calculate projected expected playhead P(t)
       const expectedTime = projectPlaybackTime(currentState, Date.now(), clockOffsetRef.current);
       const actualTime = player.getCurrentTime();
-      const driftAction = evaluateDriftAction(actualTime, expectedTime, player.getPlaybackRate());
+      const baseRate = currentState.playbackRate || 1.0;
+      const driftAction = evaluateDriftAction(actualTime, expectedTime, baseRate);
 
       switch (driftAction.type) {
         case "NONE":
-          if (player.getPlaybackRate() !== 1.0) {
-            await player.setPlaybackRate(1.0);
+          if (player.getPlaybackRate() !== baseRate) {
+            await player.setPlaybackRate(baseRate);
           }
           setSyncStatus((prev) => ({
             ...prev,
@@ -197,7 +198,7 @@ export function useSyncEngine({
           break;
 
         case "RATE_ADJUST":
-          // Tier 2: Micro-rate adjustment (0.92x or 1.08x)
+          // Tier 2: Micro-rate adjustment
           if (player.getPlaybackRate() !== driftAction.targetRate) {
             await player.setPlaybackRate(driftAction.targetRate);
           }
@@ -213,7 +214,7 @@ export function useSyncEngine({
           // Tier 3: Hard seek to authoritative projection
           isProgrammaticSyncRef.current = true;
           await player.seekTo(driftAction.targetTime);
-          await player.setPlaybackRate(1.0);
+          await player.setPlaybackRate(baseRate);
           setTimeout(() => {
             isProgrammaticSyncRef.current = false;
           }, 300);
@@ -312,7 +313,7 @@ export function useSyncEngine({
     const expectedTime = projectPlaybackTime(currentState, Date.now(), clockOffsetRef.current);
     isProgrammaticSyncRef.current = true;
     await player.seekTo(expectedTime);
-    await player.setPlaybackRate(1.0);
+    await player.setPlaybackRate(currentState.playbackRate || 1.0);
     setTimeout(() => {
       isProgrammaticSyncRef.current = false;
     }, 300);

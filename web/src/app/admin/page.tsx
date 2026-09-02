@@ -40,10 +40,14 @@ export default function AdminDashboardPage() {
     setAuthError("");
 
     // Verify admin credentials
+    const expectedPassword =
+      process.env.NEXT_PUBLIC_ADMIN_PASSWORD ||
+      "watch2gether-super-secret-jwt-2026";
+
     if (
-      (adminEmail.toLowerCase() === "rahulr24g@gmail.com" && adminPass) ||
-      adminPass === "watch2gether-super-secret-jwt-2026" ||
-      adminPass.length >= 6
+      (adminEmail.trim().toLowerCase() === "rahulr24g@gmail.com" ||
+        adminEmail.trim().toLowerCase() === "admin@watch2gether.internal") &&
+      adminPass === expectedPassword
     ) {
       setIsAuthenticated(true);
       fetchDashboardData();

@@ -36,5 +36,8 @@ export interface VideoPlayerProps extends PlayerEvents {
   onSnapSync?: () => void;
   onSendReaction?: (emoji: string) => void;
   onChangeMedia?: (newUrl: string, newType: MediaType) => void;
+  onToggleTheater?: () => void;
+  isTheaterMode?: boolean;
+  onScreenShareChange?: (isSharing: boolean) => void;
   className?: string;
 }

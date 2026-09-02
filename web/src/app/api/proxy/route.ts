@@ -24,7 +24,10 @@ export async function OPTIONS() {
 
 async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
   const { searchParams } = new URL(req.url);
-  const target = searchParams.get("url");
+  let target = searchParams.get("url");
+  if (target) {
+    target = target.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
+  }
 
   if (!target || !/^https?:\/\//i.test(target)) {
     return NextResponse.json(
@@ -88,44 +91,66 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
     }
 
     const contentType = upstream.headers.get("content-type") || "";
-    const isHls =
+    const contentLength = Number(upstream.headers.get("content-length") || 0);
+    const isExplicitHls =
       /mpegurl|m3u8/i.test(contentType) ||
       /\.m3u8(?:$|[?#])/i.test(target);
 
-    if (isHls && method === "GET") {
-      const text = await upstream.text();
-      const proxyBase = "/api/proxy?url=";
+    // If it's a GET request and not a byte-range request, check if it's an HLS playlist
+    // (either explicitly by URL/MIME or disguised under .jpg/.png/.txt with < 1.5MB size)
+    const couldBeHlsPlaylist =
+      method === "GET" &&
+      !range &&
+      !contentType.startsWith("video/") &&
+      !contentType.startsWith("audio/") &&
+      (isExplicitHls || !contentLength || contentLength < 1500000);
 
-      const rewritten = text
-        .split(/\r?\n/)
-        .map((line) => {
-          const trimmed = line.trim();
-          if (!trimmed) return line;
+    if (couldBeHlsPlaylist) {
+      const buffer = await upstream.arrayBuffer();
+      const magic = Buffer.from(buffer.slice(0, 16)).toString("utf-8").trimStart();
+      const isHls = magic.startsWith("#EXTM3U") || isExplicitHls;
 
-          // Rewrite URI="..." attributes in HLS tags (e.g. EXT-X-KEY, EXT-X-MAP)
-          if (trimmed.startsWith("#")) {
-            return line.replace(/URI="([^"]+)"/gi, (_match, uri) => {
-              try {
-                const absolute = new URL(uri, target).href;
-                return `URI="${proxyBase}${encodeURIComponent(absolute)}"`;
-              } catch {
-                return `URI="${uri}"`;
-              }
-            });
-          }
+      if (isHls) {
+        const text = Buffer.from(buffer).toString("utf-8");
+        const proxyBase = "/api/proxy?url=";
 
-          // Non-comment lines in .m3u8 are media segments (.ts) or child playlist URLs
-          try {
-            const absolute = new URL(trimmed, target).href;
-            return `${proxyBase}${encodeURIComponent(absolute)}`;
-          } catch {
-            return line;
-          }
-        })
-        .join("\n");
+        const rewritten = text
+          .split(/\r?\n/)
+          .map((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return line;
 
-      responseHeaders.set("content-type", "application/vnd.apple.mpegurl");
-      return new NextResponse(rewritten, {
+            // Rewrite URI="..." attributes in HLS tags (e.g. EXT-X-KEY, EXT-X-MAP, EXT-X-MEDIA)
+            if (trimmed.startsWith("#")) {
+              return line.replace(/URI="([^"]+)"/gi, (_match, uri) => {
+                try {
+                  const absolute = new URL(uri, target).href;
+                  return `URI="${proxyBase}${encodeURIComponent(absolute)}"`;
+                } catch {
+                  return `URI="${uri}"`;
+                }
+              });
+            }
+
+            // Non-comment lines in .m3u8 are media segments (.ts, .jpg, .png) or child playlist URLs
+            try {
+              const absolute = new URL(trimmed, target).href;
+              return `${proxyBase}${encodeURIComponent(absolute)}`;
+            } catch {
+              return line;
+            }
+          })
+          .join("\n");
+
+        responseHeaders.set("content-type", "application/vnd.apple.mpegurl");
+        return new NextResponse(rewritten, {
+          status: upstream.status,
+          headers: responseHeaders,
+        });
+      }
+
+      // If it wasn't HLS, return the uncorrupted binary buffer
+      return new NextResponse(buffer, {
         status: upstream.status,
         headers: responseHeaders,
       });

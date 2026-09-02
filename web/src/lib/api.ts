@@ -42,7 +42,7 @@ export async function createRoom(
     roomCode: randomCode,
     name: payload.name || `Watch Party ${randomCode}`,
     hostId: "host_" + Math.random().toString(36).substring(2, 8),
-    mediaUrl: payload.mediaUrl || "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    mediaUrl: payload.mediaUrl || "https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-576p.mp4",
     mediaType: payload.mediaType || "MP4",
     permissionMode: payload.permissionMode || "SHARED",
     currentTime: 0,

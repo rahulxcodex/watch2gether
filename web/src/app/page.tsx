@@ -66,44 +66,44 @@ interface SavedRoomItem {
 
 const FEATURED_TITLES = [
   {
-    title: "Big Buck Bunny",
+    title: "Blue Moon Trailer",
+    year: "2023",
+    duration: "2:04",
+    tag: "High-Definition 4K",
+    mediaUrl: "https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-576p.mp4",
+    mediaType: "MP4" as MediaType,
+    backdrop: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=80",
+    description: "Witness the pinnacle of modern sports cinematography following top athletes exploring the globe.",
+  },
+  {
+    title: "Big Buck Bunny (HLS Stream)",
     year: "2008",
     duration: "9:56",
-    tag: "Blender Open Movie",
-    mediaUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    tag: "Adaptive Multi-Bitrate HLS",
+    mediaUrl: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
     mediaType: "MP4" as MediaType,
     backdrop: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800&auto=format&fit=crop&q=80",
     description: "A large and lovable rabbit deals with bullying forest creatures in this iconic open-source animated film.",
   },
   {
-    title: "Sintel",
-    year: "2010",
-    duration: "14:48",
-    tag: "Fantasy Animation",
-    mediaUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+    title: "Cosmic Journeys",
+    year: "2024",
+    duration: "10:00",
+    tag: "Space Documentary",
+    mediaUrl: "https://www.youtube.com/watch?v=L_LUpnjgPso",
+    mediaType: "YOUTUBE" as MediaType,
+    backdrop: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80",
+    description: "Journey across galaxies and astronomical wonders with stunning high-resolution telescope imagery.",
+  },
+  {
+    title: "Blender Nature Demo",
+    year: "2022",
+    duration: "0:30",
+    tag: "CC0 Open Video",
+    mediaUrl: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
     mediaType: "MP4" as MediaType,
     backdrop: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800&auto=format&fit=crop&q=80",
-    description: "A lonely young woman searches the desert for her lost pet baby dragon, confronting dangers along the journey.",
-  },
-  {
-    title: "Tears of Steel",
-    year: "2012",
-    duration: "12:14",
-    tag: "Sci-Fi / VFX",
-    mediaUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
-    mediaType: "MP4" as MediaType,
-    backdrop: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=80",
-    description: "Set in a dystopian future Amsterdam, a squad of warriors attempts to stage a key event to alter the timeline.",
-  },
-  {
-    title: "Elephants Dream",
-    year: "2006",
-    duration: "10:53",
-    tag: "Surreal Sci-Fi",
-    mediaUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-    mediaType: "MP4" as MediaType,
-    backdrop: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80",
-    description: "Two strange characters explore a vast, organic mechanical labyrinth with bizarre inner workings.",
+    description: "Vibrant high definition micro-cinematography demo ideal for rapid player synchronization tests.",
   },
 ];
 
@@ -113,7 +113,7 @@ export default function HomePage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [roomTitle, setRoomTitle] = useState("Movie Night Party");
   const [mediaUrl, setMediaUrl] = useState(
-    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+    "https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-576p.mp4"
   );
   const [mediaType, setMediaType] = useState<MediaType>("MP4");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("SHARED");
@@ -196,9 +196,10 @@ export default function HomePage() {
     e.preventDefault();
     setIsCreating(true);
     try {
+      const cleanUrl = mediaUrl.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
       const room = await createRoom({
         name: roomTitle.trim() || "Watch Party",
-        mediaUrl: mediaUrl.trim(),
+        mediaUrl: cleanUrl,
         mediaType,
         permissionMode,
       });
@@ -319,18 +320,6 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <Link href="/admin">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-1.5 text-xs text-slate-400 hover:text-white"
-                title="Admin Command Center"
-              >
-                <ShieldCheck className="h-3.5 w-3.5 text-purple-400" />
-                <span className="hidden sm:inline">Admin</span>
-              </Button>
-            </Link>
-
             <Button
               variant="outline"
               size="sm"

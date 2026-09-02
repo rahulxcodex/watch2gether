@@ -15,6 +15,11 @@ import {
   Subtitles,
   RotateCcw,
   RotateCw,
+  Monitor,
+  Tv,
+  Keyboard,
+  Radio,
+  PictureInPicture,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -59,6 +64,13 @@ interface PlayerControlsProps {
   subtitlesActive?: boolean;
   currentMediaUrl?: string;
   onSendReaction?: (emoji: string) => void;
+  onOpenSettings?: () => void;
+  onToggleScreenShare?: () => void;
+  isScreenSharing?: boolean;
+  onOpenShortcuts?: () => void;
+  onToggleTheater?: () => void;
+  isTheaterMode?: boolean;
+  onTriggerPiP?: () => void;
 }
 
 export function PlayerControls({
@@ -84,6 +96,13 @@ export function PlayerControls({
   subtitlesActive = false,
   currentMediaUrl = "",
   onSendReaction,
+  onOpenSettings,
+  onToggleScreenShare,
+  isScreenSharing = false,
+  onOpenShortcuts,
+  onToggleTheater,
+  isTheaterMode = false,
+  onTriggerPiP,
 }: PlayerControlsProps) {
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
   const [newMediaUrl, setNewMediaUrl] = useState(currentMediaUrl);
@@ -93,10 +112,11 @@ export function PlayerControls({
 
   const handleMediaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMediaUrl.trim()) return;
+    const cleanUrl = newMediaUrl.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
+    if (!cleanUrl) return;
     const isYouTube =
-      newMediaUrl.includes("youtube.com") || newMediaUrl.includes("youtu.be");
-    onChangeMedia?.(newMediaUrl.trim(), isYouTube ? "YOUTUBE" : "MP4");
+      cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be");
+    onChangeMedia?.(cleanUrl, isYouTube ? "YOUTUBE" : "MP4");
     setIsMediaDialogOpen(false);
   };
 
@@ -239,6 +259,27 @@ export function PlayerControls({
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
+            {/* Screen Share Action Button */}
+            {onToggleScreenShare && (
+              <Button
+                variant={isScreenSharing ? "destructive" : "outline"}
+                size="sm"
+                onClick={onToggleScreenShare}
+                className={cn(
+                  "h-8 px-2.5 text-xs gap-1.5 border-slate-700 bg-slate-900/80 hover:text-white",
+                  isScreenSharing
+                    ? "bg-red-600 hover:bg-red-700 text-white border-red-500 animate-pulse"
+                    : "text-slate-300 hover:bg-slate-800"
+                )}
+                title={isScreenSharing ? "Stop Screen Share (D)" : "Share Your Screen (D)"}
+              >
+                <Monitor className="h-3.5 w-3.5 text-indigo-400" />
+                <span className="hidden md:inline">
+                  {isScreenSharing ? "Stop Share" : "Screen Share"}
+                </span>
+              </Button>
+            )}
+
             {/* Change Media Source */}
             {canControl && (
               <Button
@@ -307,6 +348,51 @@ export function PlayerControls({
               )}
             </Button>
 
+            {/* Playback Settings Gear Button */}
+            {onOpenSettings && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onOpenSettings}
+                className="h-8 w-8 text-slate-300 hover:text-white"
+                aria-label="Playback Settings"
+                title="Playback Settings (Audio Boost, Quality, Sync Delay)"
+              >
+                <Settings className="h-4 w-4 text-indigo-400" />
+              </Button>
+            )}
+
+            {/* Theater Mode Button */}
+            {onToggleTheater && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggleTheater}
+                className={cn(
+                  "hidden sm:inline-flex h-8 w-8 text-slate-300 hover:text-white",
+                  isTheaterMode && "text-indigo-400"
+                )}
+                aria-label="Theater Mode"
+                title="Theater Mode (T)"
+              >
+                <Tv className="h-4 w-4" />
+              </Button>
+            )}
+
+            {/* Keyboard Shortcuts Guide Button */}
+            {onOpenShortcuts && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onOpenShortcuts}
+                className="hidden md:inline-flex h-8 w-8 text-slate-300 hover:text-white"
+                aria-label="Keyboard Shortcuts"
+                title="Keyboard Shortcuts (?)"
+              >
+                <Keyboard className="h-4 w-4" />
+              </Button>
+            )}
+
             {/* Fullscreen Toggle */}
             <Button
               variant="ghost"
@@ -314,6 +400,7 @@ export function PlayerControls({
               onClick={onToggleFullscreen}
               className="h-8 w-8 text-slate-300 hover:text-white"
               aria-label="Fullscreen"
+              title="Fullscreen (F)"
             >
               {isFullscreen ? (
                 <Minimize className="h-4 w-4" />
@@ -336,12 +423,12 @@ export function PlayerControls({
             <form onSubmit={handleMediaSubmit} className="space-y-4 py-2">
               <div className="space-y-2">
                 <label className="text-xs font-medium text-slate-400">
-                  Video URL (YouTube, MP4, HLS, or Archive.org)
+                  Video or Live Stream URL (YouTube, MP4, HLS, or Live Stream)
                 </label>
                 <Input
                   value={newMediaUrl}
                   onChange={(e) => setNewMediaUrl(e.target.value)}
-                  placeholder="https://www.youtube.com/watch?v=... or https://.../video.mp4"
+                  placeholder="https://www.youtube.com/watch?v=... or https://.../master.m3u8"
                   className="border-slate-700 bg-slate-800 text-white font-mono text-xs"
                   autoFocus
                 />
@@ -349,26 +436,52 @@ export function PlayerControls({
               <div className="rounded-lg bg-slate-800/50 p-3 text-xs text-slate-400 border border-slate-700/50">
                 <p className="font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
-                  Quick Test Media:
+                  Quick Test Media & Public Live Streams:
                 </p>
                 <ul className="space-y-1 font-mono text-[11px] text-indigo-300">
                   <li
                     className="cursor-pointer hover:underline"
                     onClick={() =>
                       setNewMediaUrl(
-                        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                        "https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-576p.mp4"
                       )
                     }
                   >
-                    • Big Buck Bunny (Open Source MP4)
+                    • Blue Moon Trailer (Open Source MP4)
                   </li>
                   <li
                     className="cursor-pointer hover:underline"
                     onClick={() =>
-                      setNewMediaUrl("https://www.youtube.com/watch?v=L_LUpnjgPso")
+                      setNewMediaUrl(
+                        "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+                      )
                     }
                   >
-                    • Cosmic Journeys (YouTube)
+                    • Big Buck Bunny (Mux Multi-Bitrate HLS)
+                  </li>
+                  <li
+                    className="cursor-pointer hover:underline"
+                    onClick={() =>
+                      setNewMediaUrl("https://ntv.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8")
+                    }
+                  >
+                    • NASA TV (24/7 Public Live HLS Stream)
+                  </li>
+                  <li
+                    className="cursor-pointer hover:underline"
+                    onClick={() =>
+                      setNewMediaUrl("https://www.youtube.com/watch?v=jfKfPfyJRdk")
+                    }
+                  >
+                    • Lofi Girl Radio (24/7 YouTube Live)
+                  </li>
+                  <li
+                    className="cursor-pointer hover:underline"
+                    onClick={() =>
+                      setNewMediaUrl("https://nebula.bright67.online/hls/919e367f-1ffd-41c2-9c29-6c9288646556/master.m3u8")
+                    }
+                  >
+                    • Nebula Bright HLS Stream
                   </li>
                 </ul>
               </div>

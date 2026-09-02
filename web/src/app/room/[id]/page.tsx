@@ -26,6 +26,7 @@ import {
   PartnerProgressDTO,
 } from "@watch2gether/shared";
 import { MessageSquare, Users, ListVideo, AlertCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default function RoomTheaterPage() {
   const params = useParams();
@@ -42,7 +43,7 @@ export default function RoomTheaterPage() {
     roomCode,
     name: `Watch Party ${roomCode}`,
     hostId: "",
-    mediaUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    mediaUrl: "https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-576p.mp4",
     mediaType: "MP4",
     permissionMode: "SHARED",
     createdAt: Date.now(),
@@ -53,6 +54,7 @@ export default function RoomTheaterPage() {
   const [reactionBursts, setReactionBursts] = useState<ReactionBurstDTO[]>([]);
   const [activeSidebarTab, setActiveSidebarTab] = useState<string>("chat");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isTheaterMode, setIsTheaterMode] = useState(false);
 
   // The Shelf / Queue & Partner Progress
   const [queue, setQueue] = useState<QueueItemDTO[]>([]);
@@ -362,9 +364,17 @@ export default function RoomTheaterPage() {
     [socket, roomCode, isHost]
   );
 
+  const handleVideoEnded = useCallback(() => {
+    if (queue.length > 0 && canControl) {
+      const nextItem = queue[0];
+      handleChangeMedia(nextItem.url, nextItem.mediaType, nextItem.title);
+      handleRemoveFromQueue(nextItem.id);
+    }
+  }, [queue, canControl, handleChangeMedia, handleRemoveFromQueue]);
+
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white">
-      {/* Top Room Navigation Bar */}
+      {/* Top Navigation / Room Control Bar */}
       <RoomHeader
         roomCode={roomCode}
         roomName={roomDetails.name}
@@ -389,10 +399,16 @@ export default function RoomTheaterPage() {
         </div>
       )}
 
-      {/* Main Responsive 2-Column Layout */}
-      <main className="flex-1 container max-w-7xl mx-auto px-2 sm:px-4 py-4 grid grid-cols-1 lg:grid-cols-12 gap-4 h-[calc(100vh-3.5rem)] min-h-[600px]">
-        {/* Left Column (70% on Desktop): Unified Video Theater */}
-        <section className="lg:col-span-8 flex flex-col justify-center relative">
+      {/* Main Responsive Layout (Dynamic Theater Mode Support) */}
+      <main className={cn(
+        "flex-1 container max-w-7xl mx-auto px-2 sm:px-4 py-4 grid grid-cols-1 gap-4 h-[calc(100vh-3.5rem)] min-h-[600px]",
+        isTheaterMode ? "lg:grid-cols-1 max-w-[96vw]" : "lg:grid-cols-12"
+      )}>
+        {/* Unified Video Theater */}
+        <section className={cn(
+          "flex flex-col justify-center relative",
+          isTheaterMode ? "lg:col-span-1" : "lg:col-span-8"
+        )}>
           <div className="relative w-full overflow-hidden rounded-2xl">
             {/* Unified Video Player with DualScrubber, Subtitles, and Audio Ducking */}
             <VideoPlayer
@@ -407,9 +423,12 @@ export default function RoomTheaterPage() {
               onPlay={(time) => emitPlay(time)}
               onPause={(time) => emitPause(time)}
               onSeek={(time) => emitSeek(time)}
+              onEnded={handleVideoEnded}
               onSnapSync={snapToAuthoritativeTime}
               onSendReaction={handleSendReaction}
               onChangeMedia={handleChangeMedia}
+              onToggleTheater={() => setIsTheaterMode((prev) => !prev)}
+              isTheaterMode={isTheaterMode}
               className="w-full"
             />
 
@@ -418,8 +437,11 @@ export default function RoomTheaterPage() {
           </div>
         </section>
 
-        {/* Right Column (30% on Desktop): Sidebar (Chat, The Shelf, Participants) */}
-        <aside className="lg:col-span-4 flex flex-col h-full min-h-[420px] max-h-[750px]">
+        {/* Right Column: Sidebar (Chat, The Shelf, Participants) */}
+        <aside className={cn(
+          "flex flex-col h-full min-h-[420px] max-h-[750px]",
+          isTheaterMode ? "hidden" : "lg:col-span-4"
+        )}>
           <Tabs
             value={activeSidebarTab}
             onValueChange={setActiveSidebarTab}
