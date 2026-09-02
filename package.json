@@ -10,11 +10,10 @@
     "e2e"
   ],
   "scripts": {
-    "postinstall": "npm run build:backend",
     "build:shared": "npm run build -w @watch2gether/shared",
     "build:backend": "npm run build:shared && npm run build -w @watch2gether/backend",
     "build:web": "npm run build:shared && npm run build -w @watch2gether/web",
-    "build": "npm run build:backend",
+    "build": "npm run build:web",
     "start:backend": "cd backend && npm start",
     "start": "cd backend && npm start",
     "test": "npm run test --workspaces --if-present",
