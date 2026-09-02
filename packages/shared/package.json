@@ -1,0 +1,30 @@
+{
+  "name": "@watch2gether/shared",
+  "version": "1.0.0",
+  "description": "Shared TypeScript types, DTOs, socket events, and sync math for Watch2Gether",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json -w",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3",
+    "vitest": "^2.0.5"
+  }
+}

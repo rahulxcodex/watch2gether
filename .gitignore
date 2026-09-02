@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build outputs
+dist/
+.next/
+out/
+build/
+
+# Environment files - NEVER commit these
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Android build outputs
+android/.gradle/
+android/app/build/
+android/local.properties
+android/*.keystore
+android/*.jks
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Playwright test artifacts
+e2e/playwright-report/
+e2e/test-results/
+
+# TypeScript
+*.tsbuildinfo
+
+# Agents internal workdir (optional: commit or not)
+.agents/
