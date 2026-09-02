@@ -152,7 +152,6 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         className={className}
         playsInline
         preload="metadata"
-        crossOrigin="anonymous"
         onPlay={() => {
           if (!isSeekingRef.current) onPlay?.(videoRef.current?.currentTime || 0);
         }}
