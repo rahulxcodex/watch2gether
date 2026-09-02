@@ -107,10 +107,9 @@ async function handleProxy(request: any, reply: any) {
 
     const couldBeHlsPlaylist =
       request.method === 'GET' &&
-      !range &&
       !contentType.startsWith('video/') &&
       !contentType.startsWith('audio/') &&
-      (isExplicitHls || !contentLength || contentLength < 1500000);
+      (isExplicitHls || (!range && (!contentLength || contentLength < 1500000)));
 
     if (couldBeHlsPlaylist) {
       const buffer = await upstream.arrayBuffer();
@@ -122,8 +121,11 @@ async function handleProxy(request: any, reply: any) {
         text.includes('#EXT-X-STREAM-INF:');
 
       if (isRealHls) {
-        // Use relative /api/proxy?url=
-        const proxyBase = '/api/proxy?url=';
+        // Derive absolute proxyBase so that all clients (browser, mobile, Android ExoPlayer)
+        // resolve subplaylists, init chunks, and segments to this proxy without any relative path errors.
+        const host = request.headers['x-forwarded-host'] || request.headers.host;
+        const proto = request.headers['x-forwarded-proto'] || 'https';
+        const proxyBase = `${proto}://${host}/api/proxy?url=`;
 
         const rewritten = text
           .split(/\r?\n/)
@@ -154,7 +156,8 @@ async function handleProxy(request: any, reply: any) {
         reply.header('cache-control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         reply.header('content-type', 'application/vnd.apple.mpegurl');
         reply.removeHeader('content-length');
-        return reply.status(upstream.status).send(rewritten);
+        reply.removeHeader('content-range');
+        return reply.status(200).send(rewritten);
       }
 
       // If it wasn't HLS, normalize MIME type if upstream disguised video/audio as text/html

@@ -111,13 +111,12 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
       /mpegurl|m3u8/i.test(contentType) ||
       /\.m3u8(?:$|[?#])/i.test(target);
 
-    // If it's a GET request and not a byte-range request, check if it's an HLS playlist
+    // If it's an explicit HLS playlist (.m3u8 or mpegurl), ALWAYS rewrite it even if the browser sent Range: bytes=0-
     const couldBeHlsPlaylist =
       method === "GET" &&
-      !range &&
       !contentType.startsWith("video/") &&
       !contentType.startsWith("audio/") &&
-      (isExplicitHls || !contentLength || contentLength < 1500000);
+      (isExplicitHls || (!range && (!contentLength || contentLength < 1500000)));
 
     if (couldBeHlsPlaylist) {
       const buffer = await upstream.arrayBuffer();
@@ -129,7 +128,8 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
         text.includes("#EXT-X-STREAM-INF:");
 
       if (isRealHls) {
-        const proxyBase = "/api/proxy?url=";
+        // Absolute proxyBase ensures that all clients (browser, mobile, ExoPlayer) resolve cleanly to the proxy
+        const proxyBase = `${new URL(req.url).origin}/api/proxy?url=`;
 
         const rewritten = text
           .split(/\r?\n/)
@@ -160,10 +160,11 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
           .join("\n");
 
         responseHeaders.delete("content-length");
+        responseHeaders.delete("content-range");
         responseHeaders.set("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         responseHeaders.set("content-type", "application/vnd.apple.mpegurl");
         return new NextResponse(rewritten, {
-          status: upstream.status,
+          status: 200,
           headers: responseHeaders,
         });
       }
