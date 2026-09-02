@@ -29,6 +29,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       disabledReason,
       partnerProgress,
       isDucked = false,
+      onSnapSync,
       onPlay,
       onPause,
       onSeek,
@@ -320,6 +321,11 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
           case "]":
             e.preventDefault();
             setSubtitleOffset((prev) => Number((prev + 0.1).toFixed(1)));
+            break;
+          case "s":
+          case "S":
+            e.preventDefault();
+            onSnapSync?.();
             break;
           default:
             break;

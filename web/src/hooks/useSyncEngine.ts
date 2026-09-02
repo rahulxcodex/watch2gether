@@ -305,6 +305,19 @@ export function useSyncEngine({
     [socket, roomCode, canControl]
   );
 
+  const snapToAuthoritativeTime = useCallback(async () => {
+    const player = playerRef.current;
+    if (!player) return;
+    const currentState = authStateRef.current;
+    const expectedTime = projectPlaybackTime(currentState, Date.now(), clockOffsetRef.current);
+    isProgrammaticSyncRef.current = true;
+    await player.seekTo(expectedTime);
+    await player.setPlaybackRate(1.0);
+    setTimeout(() => {
+      isProgrammaticSyncRef.current = false;
+    }, 300);
+  }, [playerRef]);
+
   return {
     authoritativeState,
     syncStatus,
@@ -313,5 +326,6 @@ export function useSyncEngine({
     emitSeek,
     handleIncomingMediaSync,
     sendSyncPing,
+    snapToAuthoritativeTime,
   };
 }

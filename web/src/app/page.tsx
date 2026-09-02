@@ -21,6 +21,9 @@ import {
   FolderOpen,
   ChevronRight,
   RotateCcw,
+  Search,
+  Plus,
+  Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +42,10 @@ import { ShimmerButton } from "@/components/visual/ShimmerButton";
 import { createRoom } from "@/lib/api";
 import { MediaType, PermissionMode } from "@watch2gether/shared";
 import { formatTime } from "@/lib/utils";
+import { CatalogueModal } from "@/components/library/CatalogueModal";
+import { AddMediaModal } from "@/components/library/AddMediaModal";
+import { LibraryDetailModal } from "@/components/library/LibraryDetailModal";
+import { LibraryTitle, LibraryEpisode } from "@/components/library/types";
 
 interface ContinueWatchingItem {
   url: string;
@@ -112,6 +119,13 @@ export default function HomePage() {
   // Stored state from localStorage
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [savedRooms, setSavedRooms] = useState<SavedRoomItem[]>([]);
+  const [myLibrary, setMyLibrary] = useState<LibraryTitle[]>([]);
+
+  // Modals state
+  const [isCatalogueOpen, setIsCatalogueOpen] = useState(false);
+  const [isAddMediaOpen, setIsAddMediaOpen] = useState(false);
+  const [selectedCatalogTitle, setSelectedCatalogTitle] = useState<Partial<LibraryTitle> | null>(null);
+  const [selectedDetailTitle, setSelectedDetailTitle] = useState<LibraryTitle | null>(null);
 
   useEffect(() => {
     try {
@@ -129,6 +143,11 @@ export default function HomePage() {
       if (storedRooms) {
         const rooms: SavedRoomItem[] = JSON.parse(storedRooms);
         setSavedRooms(rooms.slice(0, 6));
+      }
+
+      const storedLib = localStorage.getItem("wtLibraryV1");
+      if (storedLib) {
+        setMyLibrary(JSON.parse(storedLib));
       }
     } catch (e) {
       // Ignore read error
@@ -177,6 +196,35 @@ export default function HomePage() {
     }
   };
 
+  const handleSelectCatalogTitle = (title: Partial<LibraryTitle>) => {
+    setSelectedCatalogTitle(title);
+    setIsAddMediaOpen(true);
+  };
+
+  const handleSaveMediaTitle = (title: LibraryTitle) => {
+    const updated = [...myLibrary.filter((t) => t.id !== title.id && t.name !== title.name), title];
+    setMyLibrary(updated);
+    try {
+      localStorage.setItem("wtLibraryV1", JSON.stringify(updated));
+    } catch {}
+  };
+
+  const handlePlayLibraryEpisode = async (episode: LibraryEpisode, title: LibraryTitle) => {
+    const isYouTube = episode.url.includes("youtube.com") || episode.url.includes("youtu.be");
+    try {
+      const room = await createRoom({
+        name: `${title.name} · ${episode.title}`,
+        mediaUrl: episode.url,
+        mediaType: isYouTube ? "YOUTUBE" : "MP4",
+        permissionMode: "SHARED",
+      });
+      router.push(`/room/${room.roomCode}`);
+    } catch {
+      const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      router.push(`/room/${fallbackCode}`);
+    }
+  };
+
   return (
     <main className="relative min-h-screen flex flex-col justify-between overflow-hidden bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white">
       {/* Background Animated Beams & Grid */}
@@ -194,11 +242,16 @@ export default function HomePage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="hidden sm:inline-flex gap-1.5 border-slate-700 text-slate-300 text-xs py-1">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-              Sub-500ms Precision Sync
-            </Badge>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsCatalogueOpen(true)}
+              className="gap-1.5 text-xs border-slate-700 bg-slate-900/60 hover:bg-slate-800 text-slate-200"
+            >
+              <Search className="h-3.5 w-3.5 text-indigo-400" />
+              <span>Browse Catalogue</span>
+            </Button>
             <Button
               variant="glow"
               size="sm"
@@ -224,7 +277,7 @@ export default function HomePage() {
         </h1>
 
         <p className="mt-5 max-w-2xl text-base sm:text-lg text-slate-400 leading-relaxed">
-          Synchronize YouTube, HLS, and local videos with dual-playhead precision. Enjoy P2P voice chat with audio ducking, custom subtitles, and zero-wall guest links.
+          Synchronize YouTube, HLS, and local videos with dual-playhead precision. Enjoy P2P voice chat with audio ducking, custom subtitles, anime catalogue search, and zero-wall guest links.
         </p>
 
         {/* CTA Actions Box */}
@@ -260,6 +313,64 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* My Media Library Section (if items exist) */}
+      {myLibrary.length > 0 && (
+        <section className="relative z-10 container max-w-6xl px-4 py-6 mx-auto">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+              <Film className="h-4 w-4 text-indigo-400" />
+              My Media Library ({myLibrary.length})
+            </h2>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsCatalogueOpen(true)}
+              className="h-7 text-xs text-indigo-400 hover:text-indigo-300 gap-1"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add Title
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {myLibrary.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => setSelectedDetailTitle(item)}
+                className="group cursor-pointer rounded-xl overflow-hidden bg-slate-900 border border-slate-800 hover:border-indigo-500/50 transition-all flex flex-col justify-between shadow-lg"
+              >
+                <div className="relative aspect-[2/3] w-full overflow-hidden bg-slate-950">
+                  {item.posterUrl ? (
+                    <img
+                      src={item.posterUrl}
+                      alt={item.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-700">
+                      <Film className="h-8 w-8" />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent opacity-80" />
+                  {item.imdbRating && (
+                    <Badge className="absolute top-2 right-2 bg-slate-950/80 text-amber-300 text-[10px] font-mono border border-slate-700 gap-1">
+                      <Star className="h-2.5 w-2.5 fill-current" />
+                      {item.imdbRating.toFixed(1)}
+                    </Badge>
+                  )}
+                </div>
+                <div className="p-2.5">
+                  <h3 className="text-xs font-semibold text-white truncate group-hover:text-indigo-300 transition-colors">
+                    {item.name}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {item.mediaType === "movie" ? "Movie" : `${item.episodes?.length || 0} episodes`}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Continue Watching Section (if history exists) */}
       {continueWatching.length > 0 && (
         <section className="relative z-10 container max-w-6xl px-4 py-6 mx-auto">
@@ -278,36 +389,32 @@ export default function HomePage() {
                   className="p-3 rounded-xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-xs font-medium text-slate-200 truncate block">
-                      {item.title}
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-400 flex-none">
-                      {formatTime(item.time)} / {formatTime(item.duration)}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-white truncate">{item.title}</p>
+                      <span className="text-[11px] text-slate-400 font-mono mt-0.5 block">
+                        {formatTime(item.time)} / {formatTime(item.duration)}
+                      </span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="glow"
+                      onClick={() => {
+                        setMediaUrl(item.url);
+                        setRoomTitle(item.title);
+                        setIsCreateOpen(true);
+                      }}
+                      className="h-7 px-2 text-[11px] gap-1 shadow-indigo-500/20 shrink-0"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      <span>Resume</span>
+                    </Button>
                   </div>
-                  {/* Progress Bar */}
-                  <div className="w-full h-1 rounded-full bg-slate-800 my-2 overflow-hidden">
+                  <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-3">
                     <div
-                      className="h-full bg-indigo-500 rounded-full"
+                      className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full"
                       style={{ width: `${progressPct}%` }}
                     />
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      const room = await createRoom({
-                        name: item.title,
-                        mediaUrl: item.url,
-                        mediaType: item.url.includes("youtube.com") ? "YOUTUBE" : "MP4",
-                      });
-                      router.push(`/room/${room.roomCode}`);
-                    }}
-                    className="h-7 text-xs border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 mt-1"
-                  >
-                    <Play className="h-3 w-3 mr-1" />
-                    Resume in New Room
-                  </Button>
                 </div>
               );
             })}
@@ -315,28 +422,26 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Saved / Recent Rooms Section (if exists) */}
+      {/* Saved / Recent Rooms Row (if any) */}
       {savedRooms.length > 0 && (
         <section className="relative z-10 container max-w-6xl px-4 py-4 mx-auto">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Radio className="h-4 w-4 text-emerald-400" />
-              Recent Rooms
-            </h2>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
-            {savedRooms.map((room) => (
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-3">
+            <Radio className="h-4 w-4 text-indigo-400" />
+            Recent Rooms
+          </h2>
+          <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none">
+            {savedRooms.map((r) => (
               <Button
-                key={room.code}
+                key={r.code}
                 variant="outline"
                 size="sm"
-                onClick={() => router.push(`/room/${room.code}`)}
-                className="h-9 px-3 border-slate-800 bg-slate-900/60 hover:bg-slate-800 text-slate-200 text-xs font-mono gap-2 flex-none"
+                onClick={() => router.push(`/room/${r.code}`)}
+                className="h-10 px-3.5 border-slate-800 bg-slate-900/50 hover:bg-slate-800 text-slate-200 flex items-center gap-2 rounded-xl shrink-0"
               >
-                <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                <span>{room.code}</span>
-                <span className="text-slate-500 font-sans font-normal truncate max-w-[120px]">
-                  {room.name}
+                <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-semibold text-white">{r.name}</span>
+                <span className="font-mono text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                  {r.code}
                 </span>
               </Button>
             ))}
@@ -421,38 +526,38 @@ export default function HomePage() {
             </CardHeader>
           </Card>
 
-          <Card className="border-slate-800 bg-slate-900/50 backdrop-blur-md hover:border-purple-500/40 transition-colors">
+          <Card className="border-slate-800 bg-slate-900/50 backdrop-blur-md hover:border-indigo-500/40 transition-colors">
             <CardHeader className="pb-3">
-              <div className="h-10 w-10 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 mb-2 border border-purple-500/20">
-                <Subtitles className="h-5 w-5" />
-              </div>
-              <CardTitle className="text-base text-white">Custom Subtitle Engine</CardTitle>
-              <CardDescription className="text-xs text-slate-400">
-                Full SRT & WebVTT support with drag & drop upload, custom font styling, and 100ms timing offset hotkeys ([ and ]).
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card className="border-slate-800 bg-slate-900/50 backdrop-blur-md hover:border-pink-500/40 transition-colors">
-            <CardHeader className="pb-3">
-              <div className="h-10 w-10 rounded-lg bg-pink-500/10 flex items-center justify-center text-pink-400 mb-2 border border-pink-500/20">
+              <div className="h-10 w-10 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 mb-2 border border-indigo-500/20">
                 <Radio className="h-5 w-5" />
               </div>
-              <CardTitle className="text-base text-white">Voice Chat & Ducking</CardTitle>
+              <CardTitle className="text-base text-white">P2P Voice & Ducking</CardTitle>
               <CardDescription className="text-xs text-slate-400">
-                P2P WebRTC audio mesh automatically ducks media audio down to 25% when your partner speaks, restoring volume smoothly.
+                WebRTC audio chat with automatic ducking drops video volume to 28% when your partner speaks.
               </CardDescription>
             </CardHeader>
           </Card>
 
-          <Card className="border-slate-800 bg-slate-900/50 backdrop-blur-md hover:border-emerald-500/40 transition-colors">
+          <Card className="border-slate-800 bg-slate-900/50 backdrop-blur-md hover:border-indigo-500/40 transition-colors">
             <CardHeader className="pb-3">
-              <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 mb-2 border border-emerald-500/20">
-                <FolderOpen className="h-5 w-5" />
+              <div className="h-10 w-10 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 mb-2 border border-indigo-500/20">
+                <Subtitles className="h-5 w-5" />
               </div>
-              <CardTitle className="text-base text-white">Local File Co-Watching</CardTitle>
+              <CardTitle className="text-base text-white">Subtitles & OpenSubs</CardTitle>
               <CardDescription className="text-xs text-slate-400">
-                Pick a video from your disk and co-watch seamlessly across peers via HTML5 blob URLs without uploading video files.
+                Render SRT, VTT, and ASS subtitles with custom sizing, background opacity, and keyboard nudging ([ / ]).
+              </CardDescription>
+            </CardHeader>
+          </Card>
+
+          <Card className="border-slate-800 bg-slate-900/50 backdrop-blur-md hover:border-indigo-500/40 transition-colors">
+            <CardHeader className="pb-3">
+              <div className="h-10 w-10 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 mb-2 border border-indigo-500/20">
+                <Search className="h-5 w-5" />
+              </div>
+              <CardTitle className="text-base text-white">Anime & Media Catalogue</CardTitle>
+              <CardDescription className="text-xs text-slate-400">
+                Browse movies and anime via TMDB & MyAnimeList with AI metadata extraction powered by Gemini & Grok.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -460,106 +565,150 @@ export default function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="relative z-10 border-t border-slate-800/60 bg-slate-950/80 py-6 text-center text-xs text-slate-500">
-        <div className="container max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 Watch2Gether. All rights reserved.</p>
+      <footer className="relative z-10 w-full border-t border-slate-800/60 py-6 text-center text-xs text-slate-500">
+        <div className="container max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p>© 2026 Watch2Gether. Zero ads, zero latency, pure co-watching.</p>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Sub-Second Latency</span>
+            <span>Render Backend</span>
             <span>•</span>
-            <span>WebSocket + Redis PubSub</span>
+            <span>Vercel Edge Frontend</span>
             <span>•</span>
-            <span>P2P WebRTC Voice</span>
+            <span>PostgreSQL & Redis</span>
           </div>
         </div>
       </footer>
 
       {/* Create Room Modal */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="sm:max-w-md bg-slate-900 border-slate-800 text-slate-100">
+        <DialogContent className="sm:max-w-md bg-slate-900 border-slate-800 text-white">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-white">
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-indigo-400" />
-              Create a Watch Party Room
+              Create Watch Party
             </DialogTitle>
             <DialogDescription className="text-slate-400 text-xs">
-              Configure your room title, starting video URL, and host playback permissions.
+              Set up your room title, default video stream, and playback controls.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleCreateSubmit} className="space-y-4 py-2">
             <div>
-              <label className="text-xs font-medium text-slate-300 mb-1.5 block">
-                Room Name
-              </label>
+              <label className="text-xs font-medium text-slate-300 mb-1 block">Room Title</label>
               <Input
                 value={roomTitle}
                 onChange={(e) => setRoomTitle(e.target.value)}
-                placeholder="e.g. Movie Night, Anime Club"
-                className="bg-slate-950 border-slate-700 text-sm text-white"
+                placeholder="e.g. Friday Night Movie"
+                className="bg-slate-950 border-slate-700 text-white text-sm"
                 required
               />
             </div>
 
             <div>
-              <label className="text-xs font-medium text-slate-300 mb-1.5 block">
-                Video URL (YouTube or direct MP4/HLS)
-              </label>
+              <label className="text-xs font-medium text-slate-300 mb-1 block">Video Stream URL</label>
               <Input
                 value={mediaUrl}
                 onChange={(e) => {
-                  const url = e.target.value;
-                  setMediaUrl(url);
-                  if (url.includes("youtube.com") || url.includes("youtu.be")) {
+                  const val = e.target.value;
+                  setMediaUrl(val);
+                  if (val.includes("youtube.com") || val.includes("youtu.be")) {
                     setMediaType("YOUTUBE");
+                  } else if (val.endsWith(".m3u8")) {
+                    setMediaType("HLS");
                   } else {
                     setMediaType("MP4");
                   }
                 }}
-                placeholder="https://..."
-                className="bg-slate-950 border-slate-700 text-sm text-white"
+                placeholder="https://.../video.mp4"
+                className="bg-slate-950 border-slate-700 text-white text-sm font-mono"
                 required
               />
             </div>
 
-            <div>
-              <label className="text-xs font-medium text-slate-300 mb-1.5 block">
-                Playback Permissions
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant={permissionMode === "SHARED" ? "glow" : "outline"}
-                  size="sm"
-                  onClick={() => setPermissionMode("SHARED")}
-                  className="text-xs"
-                >
-                  Shared (Anyone)
-                </Button>
-                <Button
-                  type="button"
-                  variant={permissionMode === "HOST_ONLY" ? "glow" : "outline"}
-                  size="sm"
-                  onClick={() => setPermissionMode("HOST_ONLY")}
-                  className="text-xs"
-                >
-                  Host Only
-                </Button>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-slate-300 mb-1 block">Media Format</label>
+                <div className="flex gap-1">
+                  {(["MP4", "YOUTUBE", "HLS"] as MediaType[]).map((type) => (
+                    <Button
+                      key={type}
+                      type="button"
+                      size="sm"
+                      variant={mediaType === type ? "glow" : "outline"}
+                      onClick={() => setMediaType(type)}
+                      className="text-xs h-8 px-2 flex-1 font-mono"
+                    >
+                      {type}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-300 mb-1 block">Control Access</label>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={permissionMode === "SHARED" ? "glow" : "outline"}
+                    onClick={() => setPermissionMode("SHARED")}
+                    className="text-xs h-8 px-2 flex-1"
+                  >
+                    Anyone
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={permissionMode === "HOST_ONLY" ? "glow" : "outline"}
+                    onClick={() => setPermissionMode("HOST_ONLY")}
+                    className="text-xs h-8 px-2 flex-1"
+                  >
+                    Host Only
+                  </Button>
+                </div>
               </div>
             </div>
 
-            <DialogFooter className="pt-2">
+            <DialogFooter className="pt-3">
               <Button
                 type="submit"
                 variant="glow"
                 disabled={isCreating}
-                className="w-full text-xs font-semibold"
+                className="w-full text-xs font-semibold h-10 shadow-indigo-500/20"
               >
-                {isCreating ? "Creating Room..." : "Launch Watch Party"}
+                {isCreating ? "Creating Room..." : "Launch Room"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Global Catalogue Search Modal */}
+      <CatalogueModal
+        isOpen={isCatalogueOpen}
+        onClose={() => setIsCatalogueOpen(false)}
+        onSelectTitle={handleSelectCatalogTitle}
+        existingLibrary={myLibrary}
+      />
+
+      {/* Add Media / Analyze Modal */}
+      <AddMediaModal
+        isOpen={isAddMediaOpen}
+        onClose={() => {
+          setIsAddMediaOpen(false);
+          setSelectedCatalogTitle(null);
+        }}
+        onSaveTitle={handleSaveMediaTitle}
+        initialSeriesName={selectedCatalogTitle?.name || ""}
+        initialImdbId={selectedCatalogTitle?.imdbId || ""}
+      />
+
+      {/* Library Detail Modal */}
+      <LibraryDetailModal
+        isOpen={!!selectedDetailTitle}
+        onClose={() => setSelectedDetailTitle(null)}
+        title={selectedDetailTitle}
+        onPlayEpisode={(ep) => selectedDetailTitle && handlePlayLibraryEpisode(ep, selectedDetailTitle)}
+      />
     </main>
   );
 }

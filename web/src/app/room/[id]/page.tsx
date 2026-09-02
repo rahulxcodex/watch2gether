@@ -86,6 +86,7 @@ export default function RoomTheaterPage() {
     emitPause,
     emitSeek,
     handleIncomingMediaSync,
+    snapToAuthoritativeTime,
   } = useSyncEngine({
     socket,
     roomCode,
@@ -406,6 +407,7 @@ export default function RoomTheaterPage() {
               onPlay={(time) => emitPlay(time)}
               onPause={(time) => emitPause(time)}
               onSeek={(time) => emitSeek(time)}
+              onSnapSync={snapToAuthoritativeTime}
               onChangeMedia={handleChangeMedia}
               className="w-full"
             />
