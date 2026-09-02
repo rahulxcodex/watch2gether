@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import { cn } from "@/lib/utils";
 import { UnifiedPlayerInstance, PlayerEvents } from "./types";
 
 declare global {
@@ -133,6 +134,8 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
 
         ytPlayerRef.current = new window.YT.Player(playerDiv.id, {
           videoId,
+          width: "100%",
+          height: "100%",
           playerVars: {
             autoplay: 0,
             controls: 0,
@@ -142,6 +145,8 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
             modestbranding: 1,
             playsinline: 1,
             rel: 0,
+            cc_load_policy: 0,
+            iv_load_policy: 3,
             origin: typeof window !== "undefined" ? window.location.origin : "",
           },
           events: {
@@ -215,7 +220,10 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
     return (
       <div
         ref={containerRef}
-        className={className || "w-full h-full pointer-events-none"}
+        className={cn(
+          "w-full h-full absolute inset-0 pointer-events-none overflow-hidden [&>iframe]:w-full [&>iframe]:h-full [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:border-0",
+          className
+        )}
       />
     );
   }

@@ -34,6 +34,7 @@ export interface VideoPlayerProps extends PlayerEvents {
   partnerProgress?: PartnerProgressDTO | null;
   isDucked?: boolean;
   onSnapSync?: () => void;
+  onSendReaction?: (emoji: string) => void;
   onChangeMedia?: (newUrl: string, newType: MediaType) => void;
   className?: string;
 }

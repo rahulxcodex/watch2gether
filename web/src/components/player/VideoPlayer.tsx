@@ -30,6 +30,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       partnerProgress,
       isDucked = false,
       onSnapSync,
+      onSendReaction,
       onPlay,
       onPause,
       onSeek,
@@ -476,6 +477,26 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
           )}
         </div>
 
+        {/* Transparent Click & Tap Shield (Parallel Signature Overlay) */}
+        <div
+          onClick={handlePlayPause}
+          onDoubleClick={handleToggleFullscreen}
+          className="absolute inset-0 z-10 cursor-pointer"
+          title={isPlaying ? "Click to Pause" : "Click to Play"}
+        />
+
+        {/* Centered Glassmorphic Play Button when paused */}
+        {!isPlaying && (
+          <div
+            onClick={handlePlayPause}
+            className="absolute inset-0 z-20 flex items-center justify-center cursor-pointer pointer-events-none"
+          >
+            <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-full bg-slate-950/75 border border-indigo-500/50 backdrop-blur-md flex items-center justify-center text-white shadow-2xl shadow-indigo-500/30 transition-transform duration-200 hover:scale-110 pointer-events-auto">
+              <Play className="h-8 w-8 sm:h-10 sm:w-10 ml-1 fill-current text-indigo-400" />
+            </div>
+          </div>
+        )}
+
         {/* Custom Subtitles Overlay */}
         <SubtitleOverlay
           rawText={subtitleText}
@@ -555,6 +576,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
             onOpenSubtitles={() => setIsSubtitlesOpen(true)}
             subtitlesActive={subtitlesEnabled && !!subtitleText}
             currentMediaUrl={mediaUrl}
+            onSendReaction={onSendReaction}
           />
         </div>
 

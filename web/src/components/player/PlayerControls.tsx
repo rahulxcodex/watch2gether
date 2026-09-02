@@ -13,6 +13,8 @@ import {
   Sparkles,
   Settings,
   Subtitles,
+  RotateCcw,
+  RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -56,6 +58,7 @@ interface PlayerControlsProps {
   onOpenSubtitles?: () => void;
   subtitlesActive?: boolean;
   currentMediaUrl?: string;
+  onSendReaction?: (emoji: string) => void;
 }
 
 export function PlayerControls({
@@ -80,6 +83,7 @@ export function PlayerControls({
   onOpenSubtitles,
   subtitlesActive = false,
   currentMediaUrl = "",
+  onSendReaction,
 }: PlayerControlsProps) {
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
   const [newMediaUrl, setNewMediaUrl] = useState(currentMediaUrl);
@@ -98,7 +102,29 @@ export function PlayerControls({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 transition-opacity duration-300">
+      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-4 transition-opacity duration-300 pointer-events-auto">
+        {/* Floating Quick Emoji Reaction Bar */}
+        {onSendReaction && (
+          <div className="flex items-center justify-end mb-2.5">
+            <div className="flex items-center gap-1.5 p-1 rounded-full bg-slate-950/80 border border-slate-700/80 backdrop-blur-md shadow-xl">
+              {["😂", "❤️", "👍", "🔥", "😲"].map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSendReaction(emoji);
+                  }}
+                  className="h-8 w-8 rounded-full flex items-center justify-center text-lg hover:scale-125 active:scale-95 transition-transform"
+                  title={`Send ${emoji} reaction`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Dual Playhead Scrubber / Drift Ribbon */}
         <div className="mb-2 flex items-center gap-3">
           <span className="text-xs font-medium text-slate-300 w-12 text-right tabular-nums">
@@ -121,17 +147,17 @@ export function PlayerControls({
 
         {/* Control Buttons Bar */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             {/* Play/Pause CTA */}
             {canControl ? (
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={onPlayPause}
-                className="h-10 w-10 text-white hover:bg-white/10 hover:text-indigo-400"
+                className="h-10 w-10 text-white hover:bg-white/10 hover:text-indigo-400 shrink-0"
                 aria-label={isPlaying ? "Pause" : "Play"}
               >
-                {isPlaying ? <Pause className="h-6 w-6" /> : <Play className="h-6 w-6 fill-current" />}
+                {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current" />}
               </Button>
             ) : (
               <Tooltip>
@@ -140,7 +166,7 @@ export function PlayerControls({
                     variant="ghost"
                     size="icon"
                     disabled
-                    className="h-10 w-10 opacity-50 text-slate-400"
+                    className="h-10 w-10 opacity-50 text-slate-400 shrink-0"
                   >
                     <Lock className="h-5 w-5 text-amber-400" />
                   </Button>
@@ -151,18 +177,44 @@ export function PlayerControls({
               </Tooltip>
             )}
 
+            {/* Rewind 10s Button */}
+            {canControl && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onSeek(Math.max(0, currentTime - 10))}
+                className="h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10"
+                title="Rewind 10s (J)"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            )}
+
+            {/* Fast-Forward 10s Button */}
+            {canControl && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onSeek(Math.min(duration, currentTime + 10))}
+                className="h-8 w-8 text-slate-300 hover:text-white hover:bg-white/10"
+                title="Forward 10s (L)"
+              >
+                <RotateCw className="h-4 w-4" />
+              </Button>
+            )}
+
             {/* Volume / Mute Controls */}
-            <div className="flex items-center gap-2 group/vol">
+            <div className="flex items-center gap-1.5 group/vol ml-1">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={onToggleMute}
-                className="h-9 w-9 text-slate-300 hover:text-white"
+                className="h-8 w-8 text-slate-300 hover:text-white"
               >
                 {isMuted || volume === 0 ? (
-                  <VolumeX className="h-5 w-5 text-red-400" />
+                  <VolumeX className="h-4 w-4 text-red-400" />
                 ) : (
-                  <Volume2 className="h-5 w-5" />
+                  <Volume2 className="h-4 w-4" />
                 )}
               </Button>
               <div className="w-16 md:w-20">
@@ -186,7 +238,7 @@ export function PlayerControls({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             {/* Change Media Source */}
             {canControl && (
               <Button
@@ -203,13 +255,13 @@ export function PlayerControls({
               </Button>
             )}
 
-            {/* Playback Rate Selector */}
+            {/* Playback Rate Selector Pill */}
             <div className="relative">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowRateMenu(!showRateMenu)}
-                className="h-8 px-2.5 text-xs text-slate-300 hover:text-white hover:bg-white/10"
+                className="h-8 px-2 text-xs font-mono text-slate-300 hover:text-white hover:bg-white/10"
               >
                 {playbackRate}x
               </Button>
@@ -243,15 +295,15 @@ export function PlayerControls({
               size="icon"
               onClick={onOpenSubtitles}
               className={cn(
-                "h-9 w-9 text-slate-300 hover:text-white relative",
+                "h-8 w-8 text-slate-300 hover:text-white relative",
                 subtitlesActive && "text-indigo-400"
               )}
               aria-label="Subtitles"
-              title="Subtitles & Captions (Hotkey: C)"
+              title="Subtitles & Settings (Hotkey: C)"
             >
               <Subtitles className="h-4 w-4" />
               {subtitlesActive && (
-                <span className="absolute bottom-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-indigo-400" />
               )}
             </Button>
 
@@ -260,13 +312,13 @@ export function PlayerControls({
               variant="ghost"
               size="icon"
               onClick={onToggleFullscreen}
-              className="h-9 w-9 text-slate-300 hover:text-white"
+              className="h-8 w-8 text-slate-300 hover:text-white"
               aria-label="Fullscreen"
             >
               {isFullscreen ? (
-                <Minimize className="h-5 w-5" />
+                <Minimize className="h-4 w-4" />
               ) : (
-                <Maximize className="h-5 w-5" />
+                <Maximize className="h-4 w-4" />
               )}
             </Button>
           </div>
@@ -284,13 +336,13 @@ export function PlayerControls({
             <form onSubmit={handleMediaSubmit} className="space-y-4 py-2">
               <div className="space-y-2">
                 <label className="text-xs font-medium text-slate-400">
-                  Video URL (YouTube or Direct MP4 Link)
+                  Video URL (YouTube, MP4, HLS, or Archive.org)
                 </label>
                 <Input
                   value={newMediaUrl}
                   onChange={(e) => setNewMediaUrl(e.target.value)}
                   placeholder="https://www.youtube.com/watch?v=... or https://.../video.mp4"
-                  className="border-slate-700 bg-slate-800 text-white"
+                  className="border-slate-700 bg-slate-800 text-white font-mono text-xs"
                   autoFocus
                 />
               </div>
@@ -299,35 +351,38 @@ export function PlayerControls({
                   <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
                   Quick Test Media:
                 </p>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setNewMediaUrl("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4")
-                  }
-                  className="block text-indigo-400 hover:underline truncate w-full text-left mt-1"
-                >
-                  Big Buck Bunny (Direct MP4)
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setNewMediaUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-                  }
-                  className="block text-indigo-400 hover:underline truncate w-full text-left mt-1"
-                >
-                  Rick Astley - Never Gonna Give You Up (YouTube)
-                </button>
+                <ul className="space-y-1 font-mono text-[11px] text-indigo-300">
+                  <li
+                    className="cursor-pointer hover:underline"
+                    onClick={() =>
+                      setNewMediaUrl(
+                        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                      )
+                    }
+                  >
+                    • Big Buck Bunny (Open Source MP4)
+                  </li>
+                  <li
+                    className="cursor-pointer hover:underline"
+                    onClick={() =>
+                      setNewMediaUrl("https://www.youtube.com/watch?v=L_LUpnjgPso")
+                    }
+                  >
+                    • Cosmic Journeys (YouTube)
+                  </li>
+                </ul>
               </div>
               <DialogFooter className="gap-2 sm:gap-0">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => setIsMediaDialogOpen(false)}
+                  className="border-slate-700 text-slate-300"
                 >
                   Cancel
                 </Button>
-                <Button type="submit" variant="glow">
-                  Update Media for Room
+                <Button type="submit" variant="glow" disabled={!newMediaUrl.trim()}>
+                  Switch Video
                 </Button>
               </DialogFooter>
             </form>

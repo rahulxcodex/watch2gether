@@ -408,6 +408,7 @@ export default function RoomTheaterPage() {
               onPause={(time) => emitPause(time)}
               onSeek={(time) => emitSeek(time)}
               onSnapSync={snapToAuthoritativeTime}
+              onSendReaction={handleSendReaction}
               onChangeMedia={handleChangeMedia}
               className="w-full"
             />
