@@ -20,7 +20,7 @@ export class RedisService {
   public async setupAdapter(
     io: SocketIOServer
   ): Promise<{ mode: 'redis' | 'memory'; isConnected: boolean }> {
-    const redisUrl = this.config?.redisUrl || process.env.REDIS_URL;
+    let redisUrl = this.config?.redisUrl || process.env.REDIS_URL;
 
     if (!redisUrl) {
       if (this.config?.logger) {
@@ -33,9 +33,21 @@ export class RedisService {
       return { mode: this.mode, isConnected: this.isConnected };
     }
 
+    // Sanitize in case user copied the CLI command or needs rediss:// for Upstash
+    redisUrl = redisUrl.trim();
+    if (redisUrl.startsWith('redis-cli')) {
+      const match = redisUrl.match(/redis:\/\/[^\s]+/);
+      if (match) {
+        redisUrl = match[0];
+      }
+    }
+    if (redisUrl.includes('upstash.io') && redisUrl.startsWith('redis://')) {
+      redisUrl = redisUrl.replace('redis://', 'rediss://');
+    }
+
     try {
       if (this.config?.logger) {
-        this.config.logger.info(`[RedisService] Connecting to Redis at ${redisUrl}...`);
+        this.config.logger.info(`[RedisService] Connecting to Redis at ${redisUrl.replace(/:[^:@]+@/, ':***@')}...`);
       }
 
       const pub = new Redis(redisUrl, {

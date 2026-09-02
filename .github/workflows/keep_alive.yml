@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Ping /api/health
         env:
-          BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL }}
+          BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL || 'https://watch2gether-zqht.onrender.com' }}
         run: |
           echo "Pinging Watch2Gether backend..."
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/api/health")
