@@ -89,6 +89,11 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       const video = videoRef.current;
       if (!video || !src) return;
 
+      // Preserve audio pitch during micro-rate drift corrections (1.08x / 0.92x)
+      (video as any).preservesPitch = true;
+      (video as any).webkitPreservesPitch = true;
+      (video as any).mozPreservesPitch = true;
+
       isMediaReadyRef.current = false;
 
       if (hlsRef.current) {

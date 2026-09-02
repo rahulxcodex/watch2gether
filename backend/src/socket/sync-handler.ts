@@ -165,14 +165,12 @@ export function registerSyncHandlers(
     }
   );
 
-  // 5. Media Change
-  socket.on(
-    'media:change',
-    async (data: {
-      roomCode?: string;
-      mediaUrl: string;
-      mediaType?: MediaType;
-    }) => {
+  // 5. Media Change (supports both media:change and room:change_media)
+  const handleMediaChange = async (data: {
+    roomCode?: string;
+    mediaUrl: string;
+    mediaType?: MediaType;
+  }) => {
       const roomCode = (data.roomCode || socket.data.roomCode)?.toUpperCase();
       if (!roomCode) return;
 
@@ -219,6 +217,8 @@ export function registerSyncHandlers(
           updatedBy: socket.data.userId || socket.id,
         });
       }
-    }
-  );
+    };
+
+  socket.on('media:change', handleMediaChange);
+  socket.on('room:change_media', handleMediaChange);
 }

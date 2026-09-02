@@ -221,7 +221,7 @@ export default function RoomTheaterPage() {
     };
 
     const onChatMessage = (msg: ChatMessageDTO) => {
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => [...prev.slice(-299), msg]);
     };
 
     const onReactionBurst = (burst: ReactionBurstDTO) => {
@@ -365,12 +365,13 @@ export default function RoomTheaterPage() {
   );
 
   const handleVideoEnded = useCallback(() => {
-    if (queue.length > 0 && canControl) {
+    // Restrict auto-advance trigger to host to prevent multi-client pop concurrency race
+    if (queue.length > 0 && isHost) {
       const nextItem = queue[0];
       handleChangeMedia(nextItem.url, nextItem.mediaType, nextItem.title);
       handleRemoveFromQueue(nextItem.id);
     }
-  }, [queue, canControl, handleChangeMedia, handleRemoveFromQueue]);
+  }, [queue, isHost, handleChangeMedia, handleRemoveFromQueue]);
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100 selection:bg-indigo-500 selection:text-white">

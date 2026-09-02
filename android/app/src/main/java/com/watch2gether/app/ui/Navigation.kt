@@ -1,6 +1,9 @@
 package com.watch2gether.app.ui
 
+import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -18,8 +21,17 @@ sealed class Screen(val route: String) {
 }
 
 @Composable
-fun Watch2GetherNavHost() {
-    val navController = rememberNavController()
+fun Watch2GetherNavHost(
+    navController: NavHostController = rememberNavController(),
+    intent: Intent? = null,
+    isInPipMode: Boolean = false
+) {
+    LaunchedEffect(intent) {
+        if (intent != null) {
+            navController.handleDeepLink(intent)
+        }
+    }
+
     NavHost(navController = navController, startDestination = Screen.Home.route) {
         composable(Screen.Home.route) {
             HomeScreen(
@@ -44,6 +56,7 @@ fun Watch2GetherNavHost() {
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
             RoomScreen(
                 roomId = roomId,
+                isInPipMode = isInPipMode,
                 onBack = { navController.popBackStack() }
             )
         }

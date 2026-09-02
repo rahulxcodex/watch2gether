@@ -136,7 +136,7 @@ export function useSyncEngine({
       if (!player) return;
 
       // 2. Local Echo Suppression: Ignore server reflection of our own initiated action
-      if (newState.issuerId && newState.issuerId === currentUser.id && isProgrammaticSyncRef.current) {
+      if (newState.issuerId && newState.issuerId === currentUser.id) {
         return;
       }
 

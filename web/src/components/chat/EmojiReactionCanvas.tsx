@@ -40,6 +40,7 @@ export function EmojiReactionCanvas({ bursts, className }: EmojiReactionCanvasPr
         const baseX = (burst.x !== undefined ? burst.x * 100 : 75) + (Math.random() * 10 - 5);
 
         for (let i = 0; i < count; i++) {
+          if (particlesRef.current.length >= 60) break;
           particlesRef.current.push({
             id: "p_" + Math.random().toString(36).substring(2, 9),
             emoji: burst.emoji,

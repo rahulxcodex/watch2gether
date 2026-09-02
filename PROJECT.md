@@ -47,7 +47,7 @@ c:\Users\Rahul\Documents\antigravity\brave-carson\
 │   └── shared/               # Shared TypeScript schemas, DTOs, and sync math (DONE)
 ├── backend/                  # Fastify REST API & Socket.io Server (DONE)
 ├── web/                      # Next.js 14/15 React Client (IN_PROGRESS)
-├── android/                  # Native Android Kotlin / Jetpack Compose Client (PLANNED)
-├── e2e/                      # Playwright E2E Multi-Client Test Suite (PLANNED)
+├── android/                  # Native Android Kotlin / Jetpack Compose Client (DONE)
+├── e2e/                      # Playwright E2E Multi-Client Test Suite (DONE)
 └── scripts/                  # Automated scripts and E2E runner (PLANNED)
 ```
