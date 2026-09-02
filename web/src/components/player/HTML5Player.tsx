@@ -29,9 +29,15 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
     const videoRef = useRef<HTMLVideoElement>(null);
     const hlsRef = useRef<Hls | null>(null);
     const isSeekingRef = useRef(false);
+    const isMediaReadyRef = useRef(false);
+    const pendingPlayRef = useRef(false);
 
     const playerApi: UnifiedPlayerInstance = {
       play: async () => {
+        if (!isMediaReadyRef.current) {
+          pendingPlayRef.current = true;
+          return;
+        }
         if (videoRef.current) {
           try {
             await videoRef.current.play();
@@ -41,6 +47,7 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         }
       },
       pause: async () => {
+        pendingPlayRef.current = false;
         if (videoRef.current) {
           videoRef.current.pause();
         }
@@ -82,10 +89,19 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       const video = videoRef.current;
       if (!video || !src) return;
 
+      isMediaReadyRef.current = false;
+
       if (hlsRef.current) {
-        hlsRef.current.destroy();
+        try {
+          hlsRef.current.destroy();
+        } catch {}
         hlsRef.current = null;
       }
+
+      // Clean video element state before switching sources
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
 
       const cleanSrc = src.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
       const isHls = /\.m3u8(?:[?#]|$)/i.test(cleanSrc) || cleanSrc.includes(".m3u8") || cleanSrc.includes("/hls/");
@@ -100,6 +116,12 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = proxiedUrl;
           video.load();
+          isMediaReadyRef.current = true;
+          onReady?.(playerApi);
+          if (pendingPlayRef.current) {
+            video.play().catch(() => {});
+            pendingPlayRef.current = false;
+          }
         } else if (Hls.isSupported()) {
           // 2. Cross-browser Hls.js demuxer
           const hls = new Hls({
@@ -112,7 +134,12 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
           hlsRef.current = hls;
 
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            isMediaReadyRef.current = true;
             onReady?.(playerApi);
+            if (pendingPlayRef.current) {
+              video.play().catch(() => {});
+              pendingPlayRef.current = false;
+            }
           });
 
           hls.on(Hls.Events.ERROR, (_evt, data) => {
@@ -138,13 +165,19 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         // Standard MP4 or direct video URL
         video.src = src;
         video.load();
+        isMediaReadyRef.current = true;
+        onReady?.(playerApi);
+        if (pendingPlayRef.current) {
+          video.play().catch(() => {});
+          pendingPlayRef.current = false;
+        }
       }
-
-      onReady?.(playerApi);
 
       return () => {
         if (hlsRef.current) {
-          hlsRef.current.destroy();
+          try {
+            hlsRef.current.destroy();
+          } catch {}
           hlsRef.current = null;
         }
       };

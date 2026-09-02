@@ -64,8 +64,29 @@ export function useSyncEngine({
 
   const isProgrammaticSyncRef = useRef<boolean>(false);
   const lastVersionRef = useRef<number>(0);
+  const lastStatusUpdateRef = useRef<number>(0);
+  const lastSyncTierRef = useRef<string>("OFFLINE");
   const driftIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper to throttle React state updates to prevent thrashing
+  const updateSyncStatusThrottled = useCallback(
+    (driftMs: number, syncTier: "IN_SYNC" | "SOFT_ADJUSTING" | "HARD_SEEKING" | "OFFLINE") => {
+      const now = Date.now();
+      const tierChanged = lastSyncTierRef.current !== syncTier;
+      if (tierChanged || now - lastStatusUpdateRef.current >= 1000) {
+        lastStatusUpdateRef.current = now;
+        lastSyncTierRef.current = syncTier;
+        setSyncStatus((prev) => ({
+          ...prev,
+          driftMs,
+          syncTier,
+          version: lastVersionRef.current,
+        }));
+      }
+    },
+    []
+  );
 
   // Send an NTP clock synchronization ping
   const sendSyncPing = useCallback(() => {
@@ -169,12 +190,7 @@ export function useSyncEngine({
             isProgrammaticSyncRef.current = false;
           }, 200);
         }
-        setSyncStatus((prev) => ({
-          ...prev,
-          driftMs: 0,
-          syncTier: "IN_SYNC",
-          version: lastVersionRef.current,
-        }));
+        updateSyncStatusThrottled(0, "IN_SYNC");
         return;
       }
 
@@ -189,12 +205,7 @@ export function useSyncEngine({
           if (player.getPlaybackRate() !== baseRate) {
             await player.setPlaybackRate(baseRate);
           }
-          setSyncStatus((prev) => ({
-            ...prev,
-            driftMs: driftAction.driftMs,
-            syncTier: "IN_SYNC",
-            version: lastVersionRef.current,
-          }));
+          updateSyncStatusThrottled(driftAction.driftMs, "IN_SYNC");
           break;
 
         case "RATE_ADJUST":
@@ -202,12 +213,7 @@ export function useSyncEngine({
           if (player.getPlaybackRate() !== driftAction.targetRate) {
             await player.setPlaybackRate(driftAction.targetRate);
           }
-          setSyncStatus((prev) => ({
-            ...prev,
-            driftMs: driftAction.driftMs,
-            syncTier: "SOFT_ADJUSTING",
-            version: lastVersionRef.current,
-          }));
+          updateSyncStatusThrottled(driftAction.driftMs, "SOFT_ADJUSTING");
           break;
 
         case "HARD_SEEK":
@@ -219,12 +225,7 @@ export function useSyncEngine({
             isProgrammaticSyncRef.current = false;
           }, 300);
 
-          setSyncStatus((prev) => ({
-            ...prev,
-            driftMs: driftAction.driftMs,
-            syncTier: "HARD_SEEKING",
-            version: lastVersionRef.current,
-          }));
+          updateSyncStatusThrottled(driftAction.driftMs, "HARD_SEEKING");
           break;
       }
     }, 150);
@@ -232,7 +233,7 @@ export function useSyncEngine({
     return () => {
       if (driftIntervalRef.current) clearInterval(driftIntervalRef.current);
     };
-  }, [playerRef]);
+  }, [playerRef, updateSyncStatusThrottled]);
 
   // Socket event binding for clock sync and media state
   useEffect(() => {
