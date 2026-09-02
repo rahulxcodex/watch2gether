@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: watch2gether-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        sync: false   # Set manually in Render dashboard (secret)
+      - key: REDIS_URL
+        sync: false   # Set manually in Render dashboard (secret)
+      - key: JWT_SECRET
+        generateValue: true   # Render auto-generates a secure random value
+    healthCheckPath: /api/health

@@ -1,0 +1,27 @@
+name: Keep Render Backend Alive
+
+# Pings the backend every 14 minutes so Render free tier never sleeps.
+# Render sleeps after 15 minutes of inactivity -- this prevents that.
+
+on:
+  schedule:
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping Backend Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health
+        env:
+          BACKEND_URL: ${{ secrets.RENDER_BACKEND_URL }}
+        run: |
+          echo "Pinging Watch2Gether backend..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/api/health")
+          echo "HTTP Status: $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            echo "Backend is alive!"
+          else
+            echo "Warning: Backend returned status $STATUS (may be waking up)"
+          fi
