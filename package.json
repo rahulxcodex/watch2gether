@@ -10,7 +10,12 @@
     "e2e"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "postinstall": "npm run build:backend",
+    "build:shared": "npm run build -w @watch2gether/shared",
+    "build:backend": "npm run build:shared && npm run build -w @watch2gether/backend",
+    "build": "npm run build:backend",
+    "start:backend": "cd backend && npm start",
+    "start": "cd backend && npm start",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"
   },

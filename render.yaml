@@ -2,7 +2,7 @@ services:
   - type: web
     name: watch2gether-backend
     runtime: node
-    buildCommand: npm install && npm run build -w @watch2gether/shared && npm run build -w @watch2gether/backend
+    buildCommand: npm install && npm run build:backend
     startCommand: cd backend && npm start
     envVars:
       - key: NODE_ENV
