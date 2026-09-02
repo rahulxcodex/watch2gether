@@ -4,6 +4,7 @@
   "private": true,
   "main": "dist/server.js",
   "scripts": {
+    "prestart": "npm run build --prefix ../packages/shared && tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
