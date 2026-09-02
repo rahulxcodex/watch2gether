@@ -89,7 +89,11 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
 
       const cleanSrc = src.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
       const isHls = /\.m3u8(?:[?#]|$)/i.test(cleanSrc) || cleanSrc.includes(".m3u8") || cleanSrc.includes("/hls/");
-      const proxiedUrl = isHls ? `/api/proxy?url=${encodeURIComponent(cleanSrc)}` : cleanSrc;
+      
+      // Use cache-busting to escape any previously cached broken/truncated master playlists
+      const proxiedUrl = isHls 
+        ? `/api/proxy?url=${encodeURIComponent(cleanSrc)}&cb=${Date.now()}` 
+        : cleanSrc;
 
       if (isHls) {
         // 1. Check native Safari HLS support
