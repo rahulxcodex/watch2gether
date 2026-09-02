@@ -55,12 +55,19 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
   }
 
   const range = req.headers.get("range");
+  const customReferer = searchParams.get("referer") || req.headers.get("x-proxy-referer");
+
   const upstreamHeaders: Record<string, string> = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     Accept: "*/*",
-    Referer: t.origin + "/",
   };
+
+  // Only pass Referer if explicitly requested by client — NEVER default to t.origin + "/"
+  // because upstream media CDNs (e.g. info.movieboxnoob.cc) trigger 403 WAF blocks on origin referrers.
+  if (customReferer) {
+    upstreamHeaders["Referer"] = customReferer;
+  }
   if (range) upstreamHeaders["Range"] = range;
 
   try {
@@ -90,6 +97,14 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
       responseHeaders.set("accept-ranges", "bytes");
     }
 
+    // If upstream returned an error (e.g. 403, 404, 500), return as-is without attempting M3U8 parsing
+    if (!upstream.ok) {
+      return new NextResponse(upstream.body, {
+        status: upstream.status,
+        headers: responseHeaders,
+      });
+    }
+
     const contentType = upstream.headers.get("content-type") || "";
     const contentLength = Number(upstream.headers.get("content-length") || 0);
     const isExplicitHls =
@@ -97,7 +112,6 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
       /\.m3u8(?:$|[?#])/i.test(target);
 
     // If it's a GET request and not a byte-range request, check if it's an HLS playlist
-    // (either explicitly by URL/MIME or disguised under .jpg/.png/.txt with < 1.5MB size)
     const couldBeHlsPlaylist =
       method === "GET" &&
       !range &&
@@ -108,10 +122,13 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
     if (couldBeHlsPlaylist) {
       const buffer = await upstream.arrayBuffer();
       const magic = Buffer.from(buffer.slice(0, 16)).toString("utf-8").trimStart();
-      const isHls = magic.startsWith("#EXTM3U") || isExplicitHls;
+      const text = Buffer.from(buffer).toString("utf-8");
+      const isRealHls =
+        magic.startsWith("#EXTM3U") ||
+        text.includes("#EXTINF:") ||
+        text.includes("#EXT-X-STREAM-INF:");
 
-      if (isHls) {
-        const text = Buffer.from(buffer).toString("utf-8");
+      if (isRealHls) {
         const proxyBase = "/api/proxy?url=";
 
         const rewritten = text
@@ -132,7 +149,7 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
               });
             }
 
-            // Non-comment lines in .m3u8 are media segments (.ts, .jpg, .png) or child playlist URLs
+            // Non-comment lines in .m3u8 are media segments (.ts, .html, .jpg, .png) or child playlist URLs
             try {
               const absolute = new URL(trimmed, target).href;
               return `${proxyBase}${encodeURIComponent(absolute)}`;
@@ -151,11 +168,34 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
         });
       }
 
-      // If it wasn't HLS, return the uncorrupted binary buffer
+      // If it wasn't HLS, normalize MIME type if upstream disguised video/audio as text/html
+      if (
+        /video_|\.mp4|\.m4s|_init\./i.test(target) ||
+        contentType.includes("text/html") && /video/i.test(target)
+      ) {
+        responseHeaders.set("content-type", "video/mp4");
+      } else if (/audio_/i.test(target)) {
+        responseHeaders.set("content-type", "audio/mp4");
+      } else if (/\.ts(?:$|[?#])/i.test(target)) {
+        responseHeaders.set("content-type", "video/mp2t");
+      }
+
       return new NextResponse(buffer, {
         status: upstream.status,
         headers: responseHeaders,
       });
+    }
+
+    // Media streaming (segments, MP4s): normalize disguised MIME types
+    if (
+      /video_|\.mp4|\.m4s|_init\./i.test(target) ||
+      contentType.includes("text/html") && /video/i.test(target)
+    ) {
+      responseHeaders.set("content-type", "video/mp4");
+    } else if (/audio_/i.test(target)) {
+      responseHeaders.set("content-type", "audio/mp4");
+    } else if (/\.ts(?:$|[?#])/i.test(target)) {
+      responseHeaders.set("content-type", "video/mp2t");
     }
 
     return new NextResponse(upstream.body, {

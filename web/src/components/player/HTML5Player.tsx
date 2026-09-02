@@ -111,9 +111,14 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
 
       const isHls = /\.m3u8(?:[?#]|$)/i.test(cleanSrc) || cleanSrc.includes(".m3u8") || cleanSrc.includes("/hls/");
       
+      const backendUrl = typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
+        ? process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "")
+        : "";
+      const proxyBase = backendUrl ? `${backendUrl}/api/proxy?url=` : `/api/proxy?url=`;
+
       // Use cache-busting to escape any previously cached broken/truncated master playlists
       const proxiedUrl = isHls 
-        ? `/api/proxy?url=${encodeURIComponent(cleanSrc)}&cb=${Date.now()}` 
+        ? `${proxyBase}${encodeURIComponent(cleanSrc)}&cb=${Date.now()}` 
         : cleanSrc;
 
       if (isHls) {
