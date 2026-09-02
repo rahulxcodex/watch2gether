@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,7 +93,7 @@ private fun FloatingEmoji(
 
     Box(
         modifier = Modifier
-            .androidx.compose.ui.graphics.graphicsLayer {
+            .graphicsLayer {
                 translationX = xOffset.toFloat()
                 translationY = yOffset
                 scaleX = currentScale

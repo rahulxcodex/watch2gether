@@ -103,7 +103,7 @@ class SyncEngine @Inject constructor(
                 })
             }
 
-            s.emit("room:join", joinPayload) { responseArgs ->
+            s.emit("room:join", arrayOf<Any>(joinPayload), io.socket.client.Ack { responseArgs ->
                 if (responseArgs != null && responseArgs.isNotEmpty()) {
                     val resp = responseArgs[0] as? JSONObject
                     if (resp != null && resp.optBoolean("success", false)) {
@@ -113,7 +113,7 @@ class SyncEngine @Inject constructor(
                         }
                     }
                 }
-            }
+            })
 
             // Begin continuous NTP handshake
             startNtpSyncLoop()
