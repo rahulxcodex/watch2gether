@@ -103,7 +103,12 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       video.removeAttribute("src");
       video.load();
 
-      const cleanSrc = src.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
+      // Extract only the valid URL — strip any leading junk and stop at first whitespace
+      // (guards against copy-paste artifacts like "…master.m3u8 Request Method GET Status Code 404…")
+      const rawSrc = src.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
+      // Take only the first token (stop at space, newline, or any non-URL char that isn't part of a valid URL)
+      const cleanSrc = rawSrc.split(/\s+/)[0];
+
       const isHls = /\.m3u8(?:[?#]|$)/i.test(cleanSrc) || cleanSrc.includes(".m3u8") || cleanSrc.includes("/hls/");
       
       // Use cache-busting to escape any previously cached broken/truncated master playlists

@@ -8,7 +8,7 @@ import type { PermissionMode, MediaType } from '@watch2gether/shared';
 const createRoomSchema = z.object({
   name: z.string().min(1).max(100).default('Watch Room'),
   mediaUrl: z.string().default(''),
-  mediaType: z.enum(['MP4', 'YOUTUBE']).default('MP4'),
+  mediaType: z.enum(['MP4', 'YOUTUBE', 'HLS']).default('MP4'),
   permissionMode: z.enum(['HOST_ONLY', 'SHARED']).default('HOST_ONLY'),
 });
 

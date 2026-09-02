@@ -56,8 +56,16 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
     const activePlayerRef = useRef<UnifiedPlayerInstance | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
+    // currentTime/duration kept as refs to avoid 4×/sec React re-renders during playback.
+    // React state is only set for UI that truly needs it (subtitle overlay, save progress, seeks).
+    const currentTimeRef = useRef(0);
+    const durationRef = useRef(0);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
+    // Ref to the progress bar <input> element for direct DOM updates (no re-render)
+    const progressBarRef = useRef<HTMLInputElement | null>(null);
+    const progressTimeRef = useRef<HTMLSpanElement | null>(null);
+    const progressDurRef = useRef<HTMLSpanElement | null>(null);
     const [volume, setVolumeState] = useState(0.8);
     const [isMuted, setIsMuted] = useState(false);
     const [playbackRate, setPlaybackRateState] = useState(1.0);
@@ -151,16 +159,19 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       }
     }, [mediaUrl]);
 
-    // Save watch progress to localStorage every 5 seconds
+    // Save watch progress to localStorage every 5 seconds using refs (not state) to avoid re-render
     useEffect(() => {
-      if (!mediaUrl || currentTime < 5) return;
+      if (!mediaUrl) return;
       const interval = setInterval(() => {
+        const ct = currentTimeRef.current;
+        const dur = durationRef.current;
+        if (ct < 5) return;
         try {
           const stored = localStorage.getItem("wtProgressV1");
           const map = stored ? JSON.parse(stored) : {};
           map[mediaUrl] = {
-            time: Math.floor(currentTime),
-            duration: Math.floor(duration),
+            time: Math.floor(ct),
+            duration: Math.floor(dur),
             title: title || mediaUrl,
             updatedAt: Date.now(),
           };
@@ -170,7 +181,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
         }
       }, 5000);
       return () => clearInterval(interval);
-    }, [mediaUrl, currentTime, duration, title]);
+    }, [mediaUrl, title]);
 
     // Apply Audio Ducking: lowers volume to 25% when peer speaks
     useEffect(() => {
@@ -514,8 +525,18 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
                 }
               }}
               onTimeUpdate={(time, dur) => {
-                setCurrentTime(time);
-                if (dur > 0) setDuration(dur);
+                currentTimeRef.current = time;
+                if (dur > 0) durationRef.current = dur;
+                // Update progress bar & time display via direct DOM — zero React overhead
+                if (progressBarRef.current && dur > 0) {
+                  progressBarRef.current.value = String(time);
+                  progressBarRef.current.max = String(dur);
+                }
+                if (progressTimeRef.current) progressTimeRef.current.textContent = formatTime(time);
+                if (progressDurRef.current) progressDurRef.current.textContent = formatTime(dur > 0 ? dur : 0);
+                // Sync subtitle overlay (needs React state) every second only
+                if (Math.floor(time) !== Math.floor(currentTime)) setCurrentTime(Math.floor(time));
+                if (dur > 0 && dur !== duration) setDuration(dur);
                 onTimeUpdate?.(time, dur);
               }}
               onBuffering={(buffering) => {
@@ -553,8 +574,16 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
                 }
               }}
               onTimeUpdate={(time, dur) => {
-                setCurrentTime(time);
-                if (dur > 0) setDuration(dur);
+                currentTimeRef.current = time;
+                if (dur > 0) durationRef.current = dur;
+                if (progressBarRef.current && dur > 0) {
+                  progressBarRef.current.value = String(time);
+                  progressBarRef.current.max = String(dur);
+                }
+                if (progressTimeRef.current) progressTimeRef.current.textContent = formatTime(time);
+                if (progressDurRef.current) progressDurRef.current.textContent = formatTime(dur > 0 ? dur : 0);
+                if (Math.floor(time) !== Math.floor(currentTime)) setCurrentTime(Math.floor(time));
+                if (dur > 0 && dur !== duration) setDuration(dur);
                 onTimeUpdate?.(time, dur);
               }}
               onBuffering={(buffering) => {
@@ -678,6 +707,7 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
             onToggleTheater={onToggleTheater}
             isTheaterMode={isTheaterMode}
             onTriggerPiP={handleTriggerPiP}
+            liveTimeGetter={() => activePlayerRef.current?.getCurrentTime() ?? currentTimeRef.current}
           />
         </div>
 

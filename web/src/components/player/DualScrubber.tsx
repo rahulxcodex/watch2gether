@@ -12,6 +12,8 @@ interface DualScrubberProps {
   canControl?: boolean;
   onSeek: (seconds: number) => void;
   className?: string;
+  /** Optional ref to the live player so we can read currentTime at rAF frequency */
+  liveTimeGetter?: () => number;
 }
 
 export function DualScrubber({
@@ -22,8 +24,14 @@ export function DualScrubber({
   canControl = true,
   onSeek,
   className = "",
+  liveTimeGetter,
 }: DualScrubberProps) {
   const railRef = useRef<HTMLDivElement>(null);
+  // DOM refs for zero-rerender progress updates
+  const trackFillRef = useRef<HTMLDivElement>(null);
+  const knobRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number | null>(null);
+
   const [isDragging, setIsDragging] = useState(false);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number>(0);
@@ -31,15 +39,14 @@ export function DualScrubber({
   const lastConvergedRef = useRef<boolean>(false);
 
   const safeDuration = duration > 0 ? duration : 100;
-  const localPercent = Math.min(100, Math.max(0, (currentTime / safeDuration) * 100));
   const bufferPercent = Math.min(100, Math.max(0, (bufferProgress / safeDuration) * 100));
 
+  // Partner progress (low-freq, computed from prop)
   const partnerPercent = useMemo(() => {
     if (!partnerProgress || !duration) return null;
     return Math.min(100, Math.max(0, (partnerProgress.currentTime / safeDuration) * 100));
   }, [partnerProgress, safeDuration, duration]);
 
-  // Drift distance in milliseconds
   const driftMs = useMemo(() => {
     if (!partnerProgress) return 0;
     return Math.round((currentTime - partnerProgress.currentTime) * 1000);
@@ -56,6 +63,22 @@ export function DualScrubber({
     }
     lastConvergedRef.current = isNowConverged;
   }, [driftMs, partnerProgress]);
+
+  // rAF loop: update track fill & knob position directly on DOM — zero React renders
+  useEffect(() => {
+    const tick = () => {
+      const liveTime = liveTimeGetter ? liveTimeGetter() : currentTime;
+      const dur = duration > 0 ? duration : 100;
+      const pct = Math.min(100, Math.max(0, (liveTime / dur) * 100));
+      if (trackFillRef.current) trackFillRef.current.style.width = `${pct}%`;
+      if (knobRef.current) knobRef.current.style.left = `${pct}%`;
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [liveTimeGetter, currentTime, duration]);
 
   const calculateTimeFromEvent = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
     if (!railRef.current) return 0;
@@ -100,6 +123,7 @@ export function DualScrubber({
   };
 
   // Gap connector geometry between local and partner
+  const localPercent = Math.min(100, Math.max(0, (currentTime / safeDuration) * 100));
   const gapLeft = partnerPercent !== null ? Math.min(localPercent, partnerPercent) : 0;
   const gapWidth = partnerPercent !== null ? Math.abs(localPercent - partnerPercent) : 0;
   const showGap = partnerPercent !== null && gapWidth > 0.5 && Math.abs(driftMs) > 150;
@@ -128,9 +152,10 @@ export function DualScrubber({
           />
         )}
 
-        {/* Local Played Track */}
+        {/* Local Played Track — updated by rAF, not React state */}
         <div
-          className="absolute left-0 h-1 rounded-full bg-gradient-to-r from-indigo-500 to-teal-400 transition-all group-hover/scrubber:h-1.5"
+          ref={trackFillRef}
+          className="absolute left-0 h-1 rounded-full bg-gradient-to-r from-indigo-500 to-teal-400 transition-none group-hover/scrubber:h-1.5"
           style={{ width: `${localPercent}%` }}
         />
 
@@ -177,8 +202,9 @@ export function DualScrubber({
           />
         )}
 
-        {/* Local Playhead Knob */}
+        {/* Local Playhead Knob — updated by rAF */}
         <div
+          ref={knobRef}
           className={cn(
             "absolute z-30 -translate-x-1/2 w-3 h-3 rounded-full bg-teal-300 border-2 border-slate-950 shadow-md transition-transform duration-150",
             (isDragging || hoverTime !== null) && "scale-125 bg-white ring-2 ring-teal-400"

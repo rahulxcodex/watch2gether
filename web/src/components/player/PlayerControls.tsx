@@ -71,6 +71,8 @@ interface PlayerControlsProps {
   onToggleTheater?: () => void;
   isTheaterMode?: boolean;
   onTriggerPiP?: () => void;
+  /** Optional getter for live currentTime — drives rAF-based progress updates without React state */
+  liveTimeGetter?: () => number;
 }
 
 export function PlayerControls({
@@ -103,6 +105,7 @@ export function PlayerControls({
   onToggleTheater,
   isTheaterMode = false,
   onTriggerPiP,
+  liveTimeGetter,
 }: PlayerControlsProps) {
   const [isMediaDialogOpen, setIsMediaDialogOpen] = useState(false);
   const [newMediaUrl, setNewMediaUrl] = useState(currentMediaUrl);
@@ -112,11 +115,13 @@ export function PlayerControls({
 
   const handleMediaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanUrl = newMediaUrl.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
+    const rawUrl = newMediaUrl.trim().split(/\s+/)[0]; // strip copy-paste garbage after URL
+    const cleanUrl = rawUrl.replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
     if (!cleanUrl) return;
-    const isYouTube =
-      cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be");
-    onChangeMedia?.(cleanUrl, isYouTube ? "YOUTUBE" : "MP4");
+    const isYouTube = cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be");
+    const isHls = cleanUrl.includes(".m3u8") || cleanUrl.includes("/hls/");
+    const mediaType = isYouTube ? "YOUTUBE" : isHls ? "HLS" : "MP4";
+    onChangeMedia?.(cleanUrl, mediaType);
     setIsMediaDialogOpen(false);
   };
 
@@ -158,6 +163,7 @@ export function PlayerControls({
               partnerProgress={partnerProgress}
               canControl={canControl}
               onSeek={onSeek}
+              liveTimeGetter={liveTimeGetter}
             />
           </div>
           <span className="text-xs font-medium text-slate-400 w-12 tabular-nums">
