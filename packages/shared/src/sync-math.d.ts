@@ -59,3 +59,30 @@ export declare function projectPlaybackTime(state: {
  * Tier 3: > 1000ms -> Hard Seek
  */
 export declare function evaluateDriftAction(localTimeSeconds: number, expectedTimeSeconds: number, currentPlaybackRate?: number): ReconciliationAction;
+/**
+ * Filters outlier NTP sync samples using Interquartile Range (IQR).
+ * Discards samples where RTT is outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR].
+ */
+export declare function filterOutliersIQR(samples: SyncSample[]): SyncSample[];
+/**
+ * Computes an adaptive EMA smoothing factor (alpha) based on RTT jitter (std dev).
+ * On noisy connections with high jitter, alpha scales down to prevent jitter contamination.
+ */
+export declare function adaptiveAlpha(rttSamples: number[], baseAlpha?: number, k?: number): number;
+/**
+ * Derives clock offset with IQR outlier filtering and dynamic jitter-adaptive EMA smoothing.
+ */
+export declare function deriveAuthoritativeOffsetAdaptive(samples: SyncSample[], previousOffset?: number, baseAlpha?: number): {
+    offset: number;
+    bestRtt: number;
+    usedAlpha: number;
+};
+/**
+ * Binary search to find the nearest buffered playback position.
+ * Prevents video stalls during hard seek by snapping to pre-buffered frames if within tolerance.
+ */
+export declare function findNearestBufferedTime(bufferedRanges: Array<{
+    start: number;
+    end: number;
+}>, targetTime: number, maxToleranceSeconds?: number): number;
+//# sourceMappingURL=sync-math.d.ts.map

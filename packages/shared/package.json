@@ -19,7 +19,7 @@
     "src"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.build.json --outDir src",
     "dev": "tsc -p tsconfig.build.json -w",
     "test": "vitest run"
   },

@@ -26,6 +26,16 @@ export declare const SOCKET_EVENTS: {
     readonly REACTION_BURST: "reaction:burst";
     readonly PERMISSION_DENIED: "permission:denied";
     readonly ERROR: "room:error";
+    readonly SIGNAL_OFFER: "signal:offer";
+    readonly SIGNAL_ANSWER: "signal:answer";
+    readonly SIGNAL_ICE: "signal:ice";
+    readonly VOICE_SPEAKING_UPDATE: "voice:speaking";
+    readonly QUEUE_ADD: "queue:add";
+    readonly QUEUE_REMOVE: "queue:remove";
+    readonly QUEUE_SWITCH: "queue:switch";
+    readonly QUEUE_UPDATED: "queue:updated";
+    readonly PROGRESS_REPORT: "media:progress_report";
+    readonly PROGRESS_UPDATE: "media:progress_update";
 };
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];
 /**
@@ -195,3 +205,4 @@ export interface SocketData {
     isHost?: boolean;
     isAuthenticated?: boolean;
 }
+//# sourceMappingURL=events.d.ts.map

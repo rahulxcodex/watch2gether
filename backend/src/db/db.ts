@@ -114,8 +114,21 @@ export function initSchema(sqlite: any) {
       FOREIGN KEY (sender_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS telemetry_events (
+      id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      room_code TEXT,
+      user_id TEXT,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
     CREATE INDEX IF NOT EXISTS idx_rooms_room_code ON rooms(room_code);
+    CREATE INDEX IF NOT EXISTS idx_rooms_host ON rooms(host_id);
     CREATE INDEX IF NOT EXISTS idx_messages_room_code ON messages(room_code);
+    CREATE INDEX IF NOT EXISTS idx_messages_room_created ON messages(room_code, created_at);
+    CREATE INDEX IF NOT EXISTS idx_users_last_active ON users(last_active_at);
+    CREATE INDEX IF NOT EXISTS idx_telemetry_event_created ON telemetry_events(event_type, created_at);
   `);
 }
 

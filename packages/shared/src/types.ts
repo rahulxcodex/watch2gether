@@ -232,6 +232,7 @@ export interface QueueItemDTO {
   addedBy?: string;
   addedByName?: string;
   createdAt: number;
+  votes?: number;
 }
 
 /**

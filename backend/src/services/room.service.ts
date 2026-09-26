@@ -1,7 +1,17 @@
 import { getDb } from '../db/db';
-import { rooms, NewRoom, Room } from '../db/schema';
+import { rooms, telemetryEvents, NewRoom, Room } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import type { PermissionMode, MediaType, PlaybackStatus, QueueItemDTO } from '@watch2gether/shared';
+import {
+  CircularBuffer,
+  PriorityQueue,
+  BloomFilter,
+  SlidingWindowRateLimiter,
+  type PermissionMode,
+  type MediaType,
+  type PlaybackStatus,
+  type QueueItemDTO,
+} from '@watch2gether/shared';
+import { nanoid } from 'nanoid';
 
 export type PlaybackState = 'PLAYING' | 'PAUSED' | 'IDLE';
 
@@ -75,10 +85,60 @@ export interface IRoomStateStore {
   setHost(roomCode: string, newHostId: string): Promise<RoomState | null>;
   addToQueue(roomCode: string, item: QueueItemDTO): Promise<RoomState | null>;
   removeFromQueue(roomCode: string, itemId: string): Promise<RoomState | null>;
+  reorderQueue(roomCode: string, fromIndex: number, toIndex: number): Promise<RoomState | null>;
+  voteQueueItem(roomCode: string, itemId: string, delta?: number): Promise<RoomState | null>;
+  sweepStaleRooms(now?: number): number;
+  getChatBuffer(roomCode: string): CircularBuffer<any>;
+  getBloomFilter(roomCode: string): BloomFilter;
+  getRateLimiter(key: string, maxRequests?: number, windowMs?: number): SlidingWindowRateLimiter;
 }
 
 export class MemoryRoomStateStore implements IRoomStateStore {
   private rooms = new Map<string, RoomState>();
+  private expiryMap = new Map<string, number>();
+  private chatBuffers = new Map<string, CircularBuffer<any>>();
+  private bloomFilters = new Map<string, BloomFilter>();
+  private rateLimiters = new Map<string, SlidingWindowRateLimiter>();
+
+  public getChatBuffer(roomCode: string): CircularBuffer<any> {
+    const code = roomCode.toUpperCase();
+    if (!this.chatBuffers.has(code)) {
+      this.chatBuffers.set(code, new CircularBuffer<any>(200));
+    }
+    return this.chatBuffers.get(code)!;
+  }
+
+  public getBloomFilter(roomCode: string): BloomFilter {
+    const code = roomCode.toUpperCase();
+    if (!this.bloomFilters.has(code)) {
+      this.bloomFilters.set(code, new BloomFilter(2048, 4));
+    }
+    return this.bloomFilters.get(code)!;
+  }
+
+  public getRateLimiter(key: string, maxRequests = 10, windowMs = 5000): SlidingWindowRateLimiter {
+    if (!this.rateLimiters.has(key)) {
+      this.rateLimiters.set(key, new SlidingWindowRateLimiter(maxRequests, windowMs));
+    }
+    return this.rateLimiters.get(key)!;
+  }
+
+  public sweepStaleRooms(now = Date.now()): number {
+    let count = 0;
+    for (const [code, expiry] of this.expiryMap.entries()) {
+      if (now >= expiry) {
+        const room = this.rooms.get(code);
+        if (room && room.members.size === 0) {
+          this.rooms.delete(code);
+          this.chatBuffers.delete(code);
+          this.bloomFilters.delete(code);
+          count++;
+        }
+        this.expiryMap.delete(code);
+      }
+    }
+    return count;
+  }
 
   public async getRoom(roomCode: string): Promise<RoomState | null> {
     const code = roomCode.toUpperCase();
@@ -119,6 +179,7 @@ export class MemoryRoomStateStore implements IRoomStateStore {
       queue: init.queue || [],
     };
     this.rooms.set(roomCode, room);
+    this.expiryMap.delete(roomCode);
     return { ...room, members: new Map(room.members) };
   }
 
@@ -138,11 +199,57 @@ export class MemoryRoomStateStore implements IRoomStateStore {
     return { ...room, members: new Map(room.members) };
   }
 
+  public async reorderQueue(
+    roomCode: string,
+    fromIndex: number,
+    toIndex: number
+  ): Promise<RoomState | null> {
+    const code = roomCode.toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room || !room.queue || room.queue.length === 0) return null;
+    if (fromIndex < 0 || fromIndex >= room.queue.length || toIndex < 0 || toIndex >= room.queue.length) {
+      return { ...room, members: new Map(room.members) };
+    }
+    const [moved] = room.queue.splice(fromIndex, 1);
+    if (moved) {
+      room.queue.splice(toIndex, 0, moved);
+    }
+    room.version += 1;
+    return { ...room, members: new Map(room.members) };
+  }
+
+  public async voteQueueItem(
+    roomCode: string,
+    itemId: string,
+    delta = 1
+  ): Promise<RoomState | null> {
+    const code = roomCode.toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room || !room.queue) return null;
+
+    const item = room.queue.find((q) => q.id === itemId);
+    if (item) {
+      item.votes = (item.votes || 0) + delta;
+      // Re-heapify / sort queue using PriorityQueue comparator
+      const pq = new PriorityQueue<QueueItemDTO>((a, b) => {
+        const votesA = a.votes || 0;
+        const votesB = b.votes || 0;
+        if (votesB !== votesA) return votesB - votesA;
+        return a.createdAt - b.createdAt;
+      });
+      for (const q of room.queue) pq.enqueue(q);
+      room.queue = pq.toSortedArray();
+      room.version += 1;
+    }
+    return { ...room, members: new Map(room.members) };
+  }
+
   public async addMember(
     roomCode: string,
     member: RoomMember
   ): Promise<{ state: RoomState; member: RoomMember }> {
     const code = roomCode.toUpperCase();
+    this.expiryMap.delete(code);
     let room = this.rooms.get(code);
     if (!room) {
       const state = await this.getRoom(code);
@@ -175,6 +282,11 @@ export class MemoryRoomStateStore implements IRoomStateStore {
 
     const removedMember = room.members.get(socketId) || null;
     room.members.delete(socketId);
+
+    if (room.members.size === 0) {
+      // 30 minute TTL for empty room eviction
+      this.expiryMap.set(code, Date.now() + 30 * 60 * 1000);
+    }
 
     let newHostId: string | null = null;
     if (removedMember && removedMember.isHost && room.members.size > 0) {
@@ -370,4 +482,26 @@ export class RoomService {
       .where(eq(rooms.roomCode, roomCode.toUpperCase()))
       .run();
   }
+
+  static async logTelemetry(
+    eventType: string,
+    roomCode?: string,
+    userId?: string,
+    payload: Record<string, unknown> = {}
+  ): Promise<void> {
+    try {
+      const db = getDb();
+      db.insert(telemetryEvents)
+        .values({
+          id: `tel_${nanoid(12)}`,
+          eventType,
+          roomCode: roomCode?.toUpperCase() || null,
+          userId: userId || null,
+          payload: JSON.stringify(payload),
+          createdAt: new Date(),
+        })
+        .run();
+    } catch {}
+  }
 }
+

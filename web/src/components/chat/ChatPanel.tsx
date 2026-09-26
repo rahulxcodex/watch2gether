@@ -5,7 +5,7 @@ import { Send, Smile, Users, MessageSquare, Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ChatMessageDTO, UserDTO } from "@watch2gether/shared";
+import { ChatMessageDTO, UserDTO, Trie } from "@watch2gether/shared";
 import { cn } from "@/lib/utils";
 
 interface ChatPanelProps {
@@ -17,6 +17,13 @@ interface ChatPanelProps {
 }
 
 export const QUICK_EMOJIS = ["❤️", "🔥", "😂", "👏", "🍿", "🎉", "😮", "🚀"];
+
+const commandTrie = new Trie<{ label: string; desc: string }>();
+commandTrie.insert('/play', { label: '/play', desc: 'Resume media playback' });
+commandTrie.insert('/pause', { label: '/pause', desc: 'Pause media playback' });
+commandTrie.insert('/sync', { label: '/sync', desc: 'Resynchronize clock & playhead' });
+commandTrie.insert('/queue', { label: '/queue', desc: 'View media playlist queue' });
+commandTrie.insert('/help', { label: '/help', desc: 'Show keyboard shortcuts' });
 
 export function ChatPanel({
   messages,
@@ -175,6 +182,24 @@ export function ChatPanel({
           ))}
         </div>
       </div>
+
+      {/* Trie Command Autocomplete Box */}
+      {inputText.startsWith("/") && commandTrie.searchPrefix(inputText.toLowerCase(), 4).length > 0 && (
+        <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-700/60 flex flex-col gap-1">
+          <div className="text-[10px] font-semibold tracking-wider text-slate-400 uppercase">Slash Commands</div>
+          {commandTrie.searchPrefix(inputText.toLowerCase(), 4).map((s) => (
+            <button
+              key={s.word}
+              type="button"
+              onClick={() => setInputText(s.word + " ")}
+              className="flex items-center justify-between text-xs px-2 py-1 rounded hover:bg-indigo-600/30 text-indigo-300 text-left transition-colors"
+            >
+              <span className="font-mono font-medium text-white">{s.word}</span>
+              <span className="text-[11px] text-slate-400">{s.metadata?.desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Chat Input Form */}
       <form

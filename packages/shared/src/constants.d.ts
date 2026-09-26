@@ -16,3 +16,4 @@ export declare const SYNC_CONSTANTS: {
     readonly MAX_CHAT_LENGTH: 500;
     readonly MAX_REACTIONS_PER_SECOND: 5;
 };
+//# sourceMappingURL=constants.d.ts.map

@@ -1,0 +1,1 @@
+{"version":3,"file":"buffer-predictor.d.ts","sourceRoot":"","sources":["buffer-predictor.ts"],"names":[],"mappings":"AAAA;;;GAGG;AACH,MAAM,WAAW,gBAAgB;IAC/B,oBAAoB,EAAE,MAAM,CAAC;IAC7B,aAAa,EAAE,OAAO,CAAC;IACvB,YAAY,EAAE,MAAM,CAAC;CACtB;AAED,wBAAgB,uBAAuB,CACrC,oBAAoB,EAAE,MAAM,EAC5B,uBAAuB,EAAE,MAAM,EAC/B,wBAAwB,EAAE,MAAM,EAChC,YAAY,SAAM,EAClB,uBAAuB,SAAM,GAC5B,gBAAgB,CAkClB"}

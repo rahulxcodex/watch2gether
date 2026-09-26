@@ -18,4 +18,21 @@ __exportStar(require("./types"), exports);
 __exportStar(require("./events"), exports);
 __exportStar(require("./sync-math"), exports);
 __exportStar(require("./constants"), exports);
+// Data Structures & Algorithms
+__exportStar(require("./dsa/circular-buffer"), exports);
+__exportStar(require("./dsa/priority-queue"), exports);
+__exportStar(require("./dsa/trie"), exports);
+__exportStar(require("./dsa/crdt"), exports);
+__exportStar(require("./dsa/bloom-filter"), exports);
+__exportStar(require("./dsa/rate-limiter"), exports);
+__exportStar(require("./dsa/consistent-hash"), exports);
+// Data Science & Mathematical Models
+__exportStar(require("./datascience/kalman-filter"), exports);
+__exportStar(require("./datascience/anomaly-detector"), exports);
+__exportStar(require("./datascience/buffer-predictor"), exports);
+__exportStar(require("./datascience/concurrency-sweepline"), exports);
+__exportStar(require("./datascience/kmeans"), exports);
+__exportStar(require("./datascience/moderation"), exports);
+__exportStar(require("./datascience/collaborative-filtering"), exports);
+__exportStar(require("./datascience/rl-reconciler"), exports);
 //# sourceMappingURL=index.js.map

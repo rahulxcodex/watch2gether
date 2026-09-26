@@ -34,5 +34,18 @@ exports.SOCKET_EVENTS = {
     // Permissions & Errors
     PERMISSION_DENIED: 'permission:denied',
     ERROR: 'room:error',
+    // WebRTC P2P Voice Chat Signaling
+    SIGNAL_OFFER: 'signal:offer',
+    SIGNAL_ANSWER: 'signal:answer',
+    SIGNAL_ICE: 'signal:ice',
+    VOICE_SPEAKING_UPDATE: 'voice:speaking',
+    // Room Queue / Shelf
+    QUEUE_ADD: 'queue:add',
+    QUEUE_REMOVE: 'queue:remove',
+    QUEUE_SWITCH: 'queue:switch',
+    QUEUE_UPDATED: 'queue:updated',
+    // Progress Reporting (for Dual Playhead Scrubber)
+    PROGRESS_REPORT: 'media:progress_report',
+    PROGRESS_UPDATE: 'media:progress_update',
 };
 //# sourceMappingURL=events.js.map

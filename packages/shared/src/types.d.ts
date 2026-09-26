@@ -5,7 +5,7 @@ export type PlaybackStatus = 'PLAYING' | 'PAUSED' | 'BUFFERING' | 'IDLE';
 /**
  * Supported media source types.
  */
-export type MediaType = 'MP4' | 'YOUTUBE';
+export type MediaType = 'MP4' | 'YOUTUBE' | 'LOCAL_FILE' | 'HLS';
 /**
  * Permission policy for room media playback control.
  * - HOST_ONLY: Only room host can play, pause, seek, or change media.
@@ -57,6 +57,7 @@ export interface RoomDTO {
     playbackState?: PlaybackStatus;
     currentTime?: number;
     version?: number;
+    queue?: QueueItemDTO[];
     createdAt: number | string;
     updatedAt?: number | string;
 }
@@ -179,3 +180,61 @@ export interface ErrorResponseDTO {
     details?: unknown;
     action?: string;
 }
+/**
+ * Parsed individual subtitle cue.
+ */
+export interface SubtitleCue {
+    id?: string;
+    start: number;
+    end: number;
+    text: string;
+}
+/**
+ * Subtitle track descriptor.
+ */
+export interface SubtitleTrack {
+    key: string;
+    label: string;
+    language?: string;
+    url?: string;
+    content?: string;
+}
+/**
+ * Media shelf / room playlist queue item.
+ */
+export interface QueueItemDTO {
+    id: string;
+    title: string;
+    url: string;
+    mediaType: MediaType;
+    duration?: number;
+    thumbnailUrl?: string;
+    addedBy?: string;
+    addedByName?: string;
+    createdAt: number;
+    votes?: number;
+}
+/**
+ * WebRTC P2P Voice Chat Signal Payload.
+ */
+export interface PeerSignalPayload {
+    roomCode: string;
+    fromUserId: string;
+    toUserId?: string;
+    signalData: any;
+    type: 'offer' | 'answer' | 'ice-candidate';
+}
+/**
+ * Partner progress report for the dual playhead scrubber ribbon.
+ */
+export interface PartnerProgressDTO {
+    userId: string;
+    name: string;
+    color?: string;
+    currentTime: number;
+    duration?: number;
+    isStalled?: boolean;
+    isSpeaking?: boolean;
+    updatedAt: number;
+}
+//# sourceMappingURL=types.d.ts.map

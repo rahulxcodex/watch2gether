@@ -5,7 +5,7 @@ import {
   PlaybackStateDTO,
   SyncSample,
   calculateSyncSample,
-  deriveAuthoritativeOffset,
+  deriveAuthoritativeOffsetAdaptive,
   projectPlaybackTime,
   evaluateDriftAction,
   SYNC_CONSTANTS,
@@ -107,7 +107,7 @@ export function useSyncEngine({
     const samples = [...syncSamplesRef.current, sample].slice(-SYNC_CONSTANTS.MAX_SAMPLE_WINDOW_SIZE);
     syncSamplesRef.current = samples;
 
-    const { offset, bestRtt } = deriveAuthoritativeOffset(samples, clockOffsetRef.current);
+    const { offset, bestRtt } = deriveAuthoritativeOffsetAdaptive(samples, clockOffsetRef.current);
     clockOffsetRef.current = offset;
     bestRttRef.current = bestRtt;
 

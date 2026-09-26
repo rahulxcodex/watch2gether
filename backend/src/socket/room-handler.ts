@@ -190,4 +190,68 @@ export function registerRoomHandlers(
       }
     }
   );
+
+  // Queue: Add Item
+  socket.on('queue:add', async (data: { roomCode?: string; item: any }) => {
+    const rawCode = data?.roomCode || socket.data.roomCode;
+    if (!rawCode || !data.item) return;
+    const roomCode = rawCode.toUpperCase();
+    const updated = await roomStore.addToQueue(roomCode, data.item);
+    if (updated) {
+      io.to(roomCode).emit('queue:updated', {
+        roomCode,
+        queue: updated.queue || [],
+        version: updated.version,
+        timestamp: Date.now(),
+      });
+    }
+  });
+
+  // Queue: Remove Item
+  socket.on('queue:remove', async (data: { roomCode?: string; itemId: string }) => {
+    const rawCode = data?.roomCode || socket.data.roomCode;
+    if (!rawCode || !data.itemId) return;
+    const roomCode = rawCode.toUpperCase();
+    const updated = await roomStore.removeFromQueue(roomCode, data.itemId);
+    if (updated) {
+      io.to(roomCode).emit('queue:updated', {
+        roomCode,
+        queue: updated.queue || [],
+        version: updated.version,
+        timestamp: Date.now(),
+      });
+    }
+  });
+
+  // Queue: Reorder Items (Tier 1.4)
+  socket.on('queue:reorder', async (data: { roomCode?: string; fromIndex: number; toIndex: number }) => {
+    const rawCode = data?.roomCode || socket.data.roomCode;
+    if (!rawCode || data.fromIndex === undefined || data.toIndex === undefined) return;
+    const roomCode = rawCode.toUpperCase();
+    const updated = await roomStore.reorderQueue(roomCode, data.fromIndex, data.toIndex);
+    if (updated) {
+      io.to(roomCode).emit('queue:updated', {
+        roomCode,
+        queue: updated.queue || [],
+        version: updated.version,
+        timestamp: Date.now(),
+      });
+    }
+  });
+
+  // Queue: Democratic Upvote (Tier 2.1 Priority Queue)
+  socket.on('queue:vote', async (data: { roomCode?: string; itemId: string; delta?: number }) => {
+    const rawCode = data?.roomCode || socket.data.roomCode;
+    if (!rawCode || !data.itemId) return;
+    const roomCode = rawCode.toUpperCase();
+    const updated = await roomStore.voteQueueItem(roomCode, data.itemId, data.delta || 1);
+    if (updated) {
+      io.to(roomCode).emit('queue:updated', {
+        roomCode,
+        queue: updated.queue || [],
+        version: updated.version,
+        timestamp: Date.now(),
+      });
+    }
+  });
 }

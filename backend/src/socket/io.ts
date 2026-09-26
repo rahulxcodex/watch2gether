@@ -30,6 +30,10 @@ export function initSocketIO(
     transports: ['websocket', 'polling'],
     pingInterval: 10000,
     pingTimeout: 5000,
+    perMessageDeflate: {
+      threshold: 128,
+      zlibDeflateOptions: { level: 1 },
+    },
   });
 
   if (redisService) {
