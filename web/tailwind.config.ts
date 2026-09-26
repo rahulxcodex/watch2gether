@@ -82,6 +82,11 @@ const config: Config = {
           "0%, 100%": { opacity: "0.4", transform: "scale(1)" },
           "50%": { opacity: "0.7", transform: "scale(1.05)" },
         },
+        "border-beam": {
+          "100%": {
+            "offset-distance": "100%",
+          },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -89,6 +94,7 @@ const config: Config = {
         shimmer: "shimmer 8s infinite",
         float: "float 2.5s ease-out forwards",
         glow: "pulseGlow 4s ease-in-out infinite",
+        "border-beam": "border-beam calc(var(--duration)*1s) infinite linear",
       },
     },
   },

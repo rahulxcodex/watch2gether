@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
-import { Send, Smile, Users, MessageSquare, Flame } from "lucide-react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import { Send, Smile, Users, MessageSquare, Flame, ShieldAlert, Cpu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ChatMessageDTO, UserDTO, Trie } from "@watch2gether/shared";
+import { ChatMessageDTO, UserDTO, Trie, SlidingWindowRateLimiter } from "@watch2gether/shared";
 import { cn } from "@/lib/utils";
 
 interface ChatPanelProps {
@@ -23,6 +23,9 @@ commandTrie.insert('/play', { label: '/play', desc: 'Resume media playback' });
 commandTrie.insert('/pause', { label: '/pause', desc: 'Pause media playback' });
 commandTrie.insert('/sync', { label: '/sync', desc: 'Resynchronize clock & playhead' });
 commandTrie.insert('/queue', { label: '/queue', desc: 'View media playlist queue' });
+commandTrie.insert('/vote', { label: '/vote', desc: 'Upvote current media in queue' });
+commandTrie.insert('/recommend', { label: '/recommend', desc: 'Fetch AI recommendations' });
+commandTrie.insert('/diagnostics', { label: '/diagnostics', desc: 'Open Kalman & RL HUD' });
 commandTrie.insert('/help', { label: '/help', desc: 'Show keyboard shortcuts' });
 
 export function ChatPanel({
@@ -60,9 +63,19 @@ export function ChatPanel({
   }, [messages, currentUser?.id]);
 
 
+  const rateLimiter = useMemo(() => new SlidingWindowRateLimiter(6, 4000), []);
+  const [isRateLimited, setIsRateLimited] = useState(false);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
+
+    if (!rateLimiter.allow()) {
+      setIsRateLimited(true);
+      setTimeout(() => setIsRateLimited(false), 3000);
+      return;
+    }
+
     onSendMessage(inputText.trim());
     setInputText("");
   };
@@ -198,6 +211,14 @@ export function ChatPanel({
               <span className="text-[11px] text-slate-400">{s.metadata?.desc}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Rate Limit Warning Banner */}
+      {isRateLimited && (
+        <div className="px-3 py-1.5 bg-rose-950/80 border-t border-rose-800/80 text-[11px] text-rose-300 flex items-center gap-1.5 animate-pulse">
+          <ShieldAlert className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+          <span>Sliding-Window Rate Limit: Please wait a moment before sending more messages.</span>
         </div>
       )}
 

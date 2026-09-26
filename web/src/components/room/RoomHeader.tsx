@@ -13,11 +13,13 @@ import {
   Mic,
   MicOff,
   Radio,
+  Cpu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PermissionControls } from "./PermissionControls";
 import { ShareModal } from "./ShareModal";
+import { SyncDiagnosticsModal } from "./SyncDiagnosticsModal";
 import { PermissionMode, UserDTO } from "@watch2gether/shared";
 import { SyncEngineStatus } from "@/hooks/useSyncEngine";
 import { cn } from "@/lib/utils";
@@ -54,6 +56,7 @@ export function RoomHeader({
   onToggleVoiceMute,
 }: RoomHeaderProps) {
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isSyncDiagnosticsOpen, setIsSyncDiagnosticsOpen] = useState(false);
 
   // Sync latency badge styling
   const getSyncBadge = () => {
@@ -123,9 +126,20 @@ export function RoomHeader({
           </div>
         </div>
 
-        {/* Center: Live Sync Latency Status */}
+        {/* Center: Live Sync Latency Status & Intelligence HUD Trigger */}
         <div className="hidden lg:flex items-center gap-2">
-          {getSyncBadge()}
+          <button
+            type="button"
+            onClick={() => setIsSyncDiagnosticsOpen(true)}
+            className="flex items-center gap-1.5 cursor-pointer hover:opacity-90 transition-opacity bg-transparent border-0 p-0"
+            title="Open Sync Intelligence & Telemetry HUD"
+          >
+            {getSyncBadge()}
+            <span className="hidden xl:inline-flex items-center gap-1 text-[10px] font-medium border border-indigo-500/30 text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded-full hover:bg-indigo-500/20 transition-colors">
+              <Cpu className="h-3 w-3" />
+              <span>Sync AI</span>
+            </span>
+          </button>
         </div>
 
         {/* Right: Actions (Permissions, Share, Presence) */}
@@ -214,6 +228,14 @@ export function RoomHeader({
         onClose={() => setIsShareOpen(false)}
         roomCode={roomCode}
         roomName={roomName}
+      />
+
+      {/* Sync Intelligence Diagnostics HUD */}
+      <SyncDiagnosticsModal
+        isOpen={isSyncDiagnosticsOpen}
+        onClose={() => setIsSyncDiagnosticsOpen(false)}
+        syncStatus={syncStatus}
+        roomCode={roomCode}
       />
     </header>
   );

@@ -25,6 +25,7 @@ import {
   Plus,
   Star,
   LogOut,
+  Cpu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,7 @@ import { CatalogueModal } from "@/components/library/CatalogueModal";
 import { AddMediaModal } from "@/components/library/AddMediaModal";
 import { LibraryDetailModal } from "@/components/library/LibraryDetailModal";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { SmartRecommendations } from "@/components/library/SmartRecommendations";
 import { LibraryTitle, LibraryEpisode } from "@/components/library/types";
 
 interface ContinueWatchingItem {
@@ -344,6 +346,17 @@ export default function HomePage() {
               <Search className="h-3.5 w-3.5 text-indigo-400" />
               <span>Browse</span>
             </Button>
+
+            <Link href="/analytics">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300"
+              >
+                <Cpu className="h-3.5 w-3.5 text-indigo-400" />
+                <span className="hidden sm:inline">Intelligence</span>
+              </Button>
+            </Link>
 
             {currentUser ? (
               <div className="flex items-center gap-2 pl-1 border-l border-slate-800">
@@ -642,6 +655,19 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* AI Collaborative Recommendations Section */}
+      <section className="relative z-10 container max-w-6xl px-4 py-4 mx-auto">
+        <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-xl">
+          <SmartRecommendations
+            onPlayMedia={(url, _mediaType, title) => {
+              setMediaUrl(url);
+              setRoomTitle(title);
+              setIsCreateOpen(true);
+            }}
+          />
+        </div>
+      </section>
+
       {/* Feature Highlights Grid */}
       <section className="relative z-10 container max-w-6xl px-4 py-8 mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -700,11 +726,21 @@ export default function HomePage() {
         <div className="container max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p>© 2026 Watch2Gether. Zero ads, zero latency, pure co-watching.</p>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Render Backend</span>
+            <Link href="/analytics" className="hover:text-indigo-300 transition-colors">
+              Platform Intelligence
+            </Link>
             <span>•</span>
-            <span>Vercel Edge Frontend</span>
+            <Link href="/privacy" className="hover:text-indigo-300 transition-colors">
+              Privacy Policy
+            </Link>
             <span>•</span>
-            <span>PostgreSQL & Redis</span>
+            <Link href="/terms" className="hover:text-indigo-300 transition-colors">
+              Terms & Conditions
+            </Link>
+            <span>•</span>
+            <Link href="/admin" className="hover:text-indigo-300 transition-colors">
+              Admin
+            </Link>
           </div>
         </div>
       </footer>

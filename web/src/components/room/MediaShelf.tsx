@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useRef } from "react";
-import { QueueItemDTO, MediaType } from "@watch2gether/shared";
+import React, { useState, useRef, useMemo } from "react";
+import { QueueItemDTO, MediaType, PriorityQueue } from "@watch2gether/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -16,9 +16,11 @@ import {
   Check,
   Search,
   Sparkles,
+  ThumbsUp,
 } from "lucide-react";
 import { CatalogueModal } from "@/components/library/CatalogueModal";
 import { AddMediaModal } from "@/components/library/AddMediaModal";
+import { SmartRecommendations } from "@/components/library/SmartRecommendations";
 import { LibraryTitle, LibraryEpisode } from "@/components/library/types";
 
 interface MediaShelfProps {
@@ -47,6 +49,35 @@ export function MediaShelf({
   const [isAddMediaOpen, setIsAddMediaOpen] = useState(false);
   const [selectedCatalogTitle, setSelectedCatalogTitle] = useState<Partial<LibraryTitle> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [votes, setVotes] = useState<Record<string, number>>({});
+
+  const handleVote = (itemId: string) => {
+    setVotes((prev) => ({
+      ...prev,
+      [itemId]: (prev[itemId] || 0) + 1,
+    }));
+  };
+
+  // Max-Heap PriorityQueue dynamically reordering queue items by popularity/votes
+  const sortedQueue = useMemo(() => {
+    if (!queue || queue.length <= 1) return queue || [];
+    const pq = new PriorityQueue<QueueItemDTO>((a, b) => {
+      const voteA = votes[a.id] || 0;
+      const voteB = votes[b.id] || 0;
+      return voteB - voteA;
+    });
+
+    for (const item of queue) {
+      pq.enqueue(item);
+    }
+
+    const res: QueueItemDTO[] = [];
+    while (!pq.isEmpty()) {
+      const it = pq.dequeue();
+      if (it) res.push(it);
+    }
+    return res;
+  }, [queue, votes]);
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -226,10 +257,10 @@ export function MediaShelf({
         </Button>
       </div>
 
-      {/* Queue List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-        {queue.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500">
+      {/* Queue List (PriorityQueue Sorted) */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-3">
+        {sortedQueue.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center text-slate-500">
             <Film className="h-8 w-8 mb-2 opacity-40 text-slate-400" />
             <span className="text-xs font-medium">The Shelf is empty</span>
             <span className="text-[11px] text-slate-600 mt-1 max-w-[200px]">
@@ -237,82 +268,120 @@ export function MediaShelf({
             </span>
           </div>
         ) : (
-          queue.map((item, idx) => {
-            const isPlayingThis = currentMediaUrl === item.url;
-            return (
-              <div
-                key={item.id || `q_${idx}`}
-                className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
-                  isPlayingThis
-                    ? "bg-indigo-950/40 border-indigo-500/50 shadow-sm shadow-indigo-500/10"
-                    : "bg-slate-900/50 border-slate-800/80 hover:border-slate-700"
-                }`}
-              >
-                <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                  <div
-                    className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                      isPlayingThis
-                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                        : "bg-slate-800 text-slate-400"
-                    }`}
-                  >
-                    {item.mediaType === "LOCAL_FILE" ? (
-                      <FolderOpen className="h-3.5 w-3.5" />
-                    ) : item.mediaType === "YOUTUBE" ? (
-                      <Tv className="h-3.5 w-3.5" />
-                    ) : (
-                      <Film className="h-3.5 w-3.5" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-white truncate max-w-[160px] sm:max-w-[200px]">
-                      {item.title}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <Badge
-                        variant="secondary"
-                        className="text-[9px] py-0 px-1 font-mono bg-slate-800 text-slate-400 border-none"
-                      >
-                        {item.mediaType}
-                      </Badge>
-                      {isPlayingThis && (
-                        <span className="text-[9px] text-emerald-400 font-semibold flex items-center gap-0.5">
-                          <Check className="h-2.5 w-2.5" /> Now Playing
-                        </span>
+          <div className="space-y-1.5">
+            {sortedQueue.map((item, idx) => {
+              const isPlayingThis = currentMediaUrl === item.url;
+              const voteCount = votes[item.id] || 0;
+              return (
+                <div
+                  key={item.id || `q_${idx}`}
+                  className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                    isPlayingThis
+                      ? "bg-indigo-950/40 border-indigo-500/50 shadow-sm shadow-indigo-500/10"
+                      : "bg-slate-900/50 border-slate-800/80 hover:border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        isPlayingThis
+                          ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                          : "bg-slate-800 text-slate-400"
+                      }`}
+                    >
+                      {item.mediaType === "LOCAL_FILE" ? (
+                        <FolderOpen className="h-3.5 w-3.5" />
+                      ) : item.mediaType === "YOUTUBE" ? (
+                        <Tv className="h-3.5 w-3.5" />
+                      ) : (
+                        <Film className="h-3.5 w-3.5" />
                       )}
                     </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-white truncate max-w-[140px] sm:max-w-[180px]">
+                        {item.title}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <Badge
+                          variant="secondary"
+                          className="text-[9px] py-0 px-1 font-mono bg-slate-800 text-slate-400 border-none"
+                        >
+                          {item.mediaType}
+                        </Badge>
+                        {voteCount > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] py-0 px-1 font-mono border-amber-500/30 text-amber-300 bg-amber-500/5"
+                          >
+                            +{voteCount} Upvotes
+                          </Badge>
+                        )}
+                        {isPlayingThis && (
+                          <span className="text-[9px] text-emerald-400 font-semibold flex items-center gap-0.5">
+                            <Check className="h-2.5 w-2.5" /> Now Playing
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-1 shrink-0">
-                  {canControl && !isPlayingThis && (
-                    <Button
-                      size="sm"
-                      variant="glow"
-                      onClick={() => onSwitchMedia(item.url, item.mediaType, item.title)}
-                      className="h-7 px-2 text-[11px] gap-1 shadow-indigo-500/20"
-                      title="Switch Room to this Video"
-                    >
-                      <Play className="h-3 w-3 fill-current" />
-                      <span>Play</span>
-                    </Button>
-                  )}
-                  {canControl && (
+                  <div className="flex items-center gap-1 shrink-0">
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => onRemoveFromQueue(item.id)}
-                      className="h-7 w-7 p-0 text-slate-400 hover:text-red-400 hover:bg-red-500/10"
-                      title="Remove from Shelf"
+                      onClick={() => handleVote(item.id)}
+                      className="h-7 px-1.5 text-[11px] text-slate-400 hover:text-amber-300 gap-1"
+                      title="Upvote Priority"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <ThumbsUp className="h-3 w-3" />
+                      <span className="text-[10px]">{voteCount}</span>
                     </Button>
-                  )}
+                    {canControl && !isPlayingThis && (
+                      <Button
+                        size="sm"
+                        variant="glow"
+                        onClick={() => onSwitchMedia(item.url, item.mediaType, item.title)}
+                        className="h-7 px-2 text-[11px] gap-1 shadow-indigo-500/20"
+                        title="Switch Room to this Video"
+                      >
+                        <Play className="h-3 w-3 fill-current" />
+                        <span>Play</span>
+                      </Button>
+                    )}
+                    {canControl && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRemoveFromQueue(item.id)}
+                        className="h-7 w-7 p-0 text-slate-400 hover:text-red-400 hover:bg-red-500/10"
+                        title="Remove from Shelf"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            })}
+          </div>
         )}
+
+        {/* AI Recommendations Inside Shelf */}
+        <div className="pt-3 border-t border-slate-800/80">
+          <SmartRecommendations
+            currentMediaUrl={currentMediaUrl}
+            onPlayMedia={(url, mediaType, title) => {
+              if (canControl) onSwitchMedia(url, mediaType, title);
+            }}
+            onAddToQueue={(item) => {
+              onAddToQueue({
+                title: item.title,
+                url: item.url,
+                mediaType: item.mediaType,
+              });
+            }}
+          />
+        </div>
       </div>
 
       {/* Catalogue Search Modal */}

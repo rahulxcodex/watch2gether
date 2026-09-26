@@ -1,0 +1,16 @@
+{
+  "name": "Watch2Gether",
+  "short_name": "Watch2Gether",
+  "description": "Real-time synchronized media playback with sub-second latency and live chat",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0C0D0E",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
