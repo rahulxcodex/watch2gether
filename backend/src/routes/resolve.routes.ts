@@ -1,9 +1,10 @@
-import { FastifyPluginAsync } from 'fastify';
+import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 
 export const resolveRoutes: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/resolve', async (request, reply) => {
+  const handleResolve = async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = request.query as Record<string, string | undefined> | undefined;
     const body = request.body as Record<string, any> | undefined;
-    let rawUrl = String(body?.url || '').trim();
+    let rawUrl = String(query?.url || body?.url || '').trim();
 
     if (!rawUrl) {
       return reply.status(400).send({ error: 'Missing url parameter' });
@@ -18,6 +19,7 @@ export const resolveRoutes: FastifyPluginAsync = async (fastify) => {
     // 1. YouTube Detection
     if (/youtube\.com|youtu\.be/i.test(rawUrl)) {
       return reply.send({
+        streamUrl: rawUrl,
         resolvedUrl: rawUrl,
         originalUrl: rawUrl,
         mediaType: 'YOUTUBE',
@@ -85,6 +87,7 @@ export const resolveRoutes: FastifyPluginAsync = async (fastify) => {
             const isHls = targetFileName.endsWith('.m3u8');
 
             return reply.send({
+              streamUrl: resolvedUrl,
               resolvedUrl,
               originalUrl: rawUrl,
               mediaType: isHls ? 'HLS' : 'MP4',
@@ -112,6 +115,7 @@ export const resolveRoutes: FastifyPluginAsync = async (fastify) => {
         resolvedUrl += (resolvedUrl.includes('?') ? '&' : '?') + 'raw=1';
       }
       return reply.send({
+        streamUrl: resolvedUrl,
         resolvedUrl,
         originalUrl: rawUrl,
         mediaType: 'MP4',
@@ -122,11 +126,24 @@ export const resolveRoutes: FastifyPluginAsync = async (fastify) => {
     // 4. Default HLS vs MP4 Detection
     const isExplicitHls = /\.m3u8(?:[?#]|$)/i.test(rawUrl) || rawUrl.includes('/hls/');
     return reply.send({
+      streamUrl: rawUrl,
       resolvedUrl: rawUrl,
       originalUrl: rawUrl,
       mediaType: isExplicitHls ? 'HLS' : 'MP4',
       needsProxy: isExplicitHls,
       provider: 'direct',
     });
+  };
+
+  fastify.route({
+    method: ['GET', 'POST'],
+    url: '/resolve',
+    handler: handleResolve,
+  });
+
+  fastify.route({
+    method: ['GET', 'POST'],
+    url: '/api/resolve',
+    handler: handleResolve,
   });
 };
