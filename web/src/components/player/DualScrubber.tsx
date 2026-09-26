@@ -64,14 +64,19 @@ export function DualScrubber({
     lastConvergedRef.current = isNowConverged;
   }, [driftMs, partnerProgress]);
 
+  const isDraggingRef = useRef(false);
+  const dragTargetTimeRef = useRef<number>(0);
+
   // rAF loop: update track fill & knob position directly on DOM — zero React renders
   useEffect(() => {
     const tick = () => {
-      const liveTime = liveTimeGetter ? liveTimeGetter() : currentTime;
-      const dur = duration > 0 ? duration : 100;
-      const pct = Math.min(100, Math.max(0, (liveTime / dur) * 100));
-      if (trackFillRef.current) trackFillRef.current.style.width = `${pct}%`;
-      if (knobRef.current) knobRef.current.style.left = `${pct}%`;
+      if (!isDraggingRef.current) {
+        const liveTime = liveTimeGetter ? liveTimeGetter() : currentTime;
+        const dur = duration > 0 ? duration : 100;
+        const pct = Math.min(100, Math.max(0, (liveTime / dur) * 100));
+        if (trackFillRef.current) trackFillRef.current.style.width = `${pct}%`;
+        if (knobRef.current) knobRef.current.style.left = `${pct}%`;
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -80,37 +85,72 @@ export function DualScrubber({
     };
   }, [liveTimeGetter, currentTime, duration]);
 
-  const calculateTimeFromEvent = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
+  const calculateTimeFromClientX = (clientX: number) => {
     if (!railRef.current) return 0;
     const rect = railRef.current.getBoundingClientRect();
-    const clickX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width));
     const fraction = clickX / rect.width;
     return fraction * safeDuration;
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  const updateVisualPosition = (time: number) => {
+    const pct = Math.min(100, Math.max(0, (time / safeDuration) * 100));
+    if (trackFillRef.current) trackFillRef.current.style.width = `${pct}%`;
+    if (knobRef.current) knobRef.current.style.left = `${pct}%`;
+  };
+
+  const startDrag = (clientX: number) => {
     if (!canControl) return;
     setIsDragging(true);
-    const target = calculateTimeFromEvent(e);
-    onSeek(target);
+    isDraggingRef.current = true;
+    const target = calculateTimeFromClientX(clientX);
+    dragTargetTimeRef.current = target;
+    updateVisualPosition(target);
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const time = calculateTimeFromEvent(moveEvent);
-      onSeek(time);
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const x = "touches" in e ? e.touches[0].clientX : e.clientX;
+      const t = calculateTimeFromClientX(x);
+      dragTargetTimeRef.current = t;
+      updateVisualPosition(t);
+      if (railRef.current) {
+        const rect = railRef.current.getBoundingClientRect();
+        const frac = Math.max(0, Math.min((x - rect.left) / rect.width, 1));
+        setHoverPosition(frac * 100);
+        setHoverTime(t);
+      }
     };
 
-    const handleMouseUp = () => {
+    const onEnd = () => {
       setIsDragging(false);
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      isDraggingRef.current = false;
+      setHoverTime(null);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onEnd);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onEnd);
+      onSeek(dragTargetTimeRef.current);
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onEnd);
+    window.addEventListener("touchmove", onMove, { passive: true });
+    window.addEventListener("touchend", onEnd);
+    window.addEventListener("touchcancel", onEnd);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    startDrag(e.clientX);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length > 0) {
+      startDrag(e.touches[0].clientX);
+    }
   };
 
   const handleMouseMoveRail = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!railRef.current) return;
+    if (!railRef.current || isDraggingRef.current) return;
     const rect = railRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const fraction = Math.max(0, Math.min(x / rect.width, 1));
@@ -119,7 +159,9 @@ export function DualScrubber({
   };
 
   const handleMouseLeaveRail = () => {
-    setHoverTime(null);
+    if (!isDraggingRef.current) {
+      setHoverTime(null);
+    }
   };
 
   // Gap connector geometry between local and partner
@@ -134,6 +176,7 @@ export function DualScrubber({
       <div
         ref={railRef}
         onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
         onMouseMove={handleMouseMoveRail}
         onMouseLeave={handleMouseLeaveRail}
         className={cn(

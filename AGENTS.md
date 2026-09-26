@@ -1,4 +1,4 @@
-﻿# Watch2Gether Project Atlas & Subagent Context
+# Watch2Gether Project Atlas & Subagent Context
 
 ## High-Density Architectural Map
 - **Monorepo Structure**:
@@ -25,3 +25,8 @@
 2. **Never scan directories**. Use the file index above to jump directly to the code.
 3. **Never read lockfiles** (`package-lock.json`).
 4. **Keep reports under 150 words** or deliver structured code diffs.
+5. **Zero Consecutive Duplicate Tool Calls**: NEVER call the same tool with identical arguments consecutively. If a file slice or command output is already in context, transition immediately to modification or synthesis.
+
+## Android Media3 & Compose Invariants
+- In Jetpack Compose + ExoPlayer integrations, always set `exoPlayer.playWhenReady = isPlaying` and dispatch `play()`/`pause()` directly. Never gate playback behind `exoPlayer.isPlaying` equality checks, as `isPlaying` is false during initial buffering.
+

@@ -16,6 +16,25 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Invalid subtitle URL" }, { status: 400 });
       }
 
+      let t: URL;
+      try {
+        t = new URL(url);
+      } catch {
+        return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+      }
+
+      if (
+        /^(localhost|127\.|0\.|10\.|192\.168\.|169\.254\.|::1)/i.test(t.hostname) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(t.hostname) ||
+        t.hostname.endsWith(".local") ||
+        t.hostname.endsWith(".internal")
+      ) {
+        return NextResponse.json(
+          { error: "Private network access refused." },
+          { status: 400 }
+        );
+      }
+
       const res = await fetch(url, {
         headers: { "User-Agent": "Watch2Gether/1.0" },
       });

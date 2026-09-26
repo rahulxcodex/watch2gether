@@ -196,11 +196,26 @@ export default function HomePage() {
     e.preventDefault();
     setIsCreating(true);
     try {
-      const cleanUrl = mediaUrl.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
+      let cleanUrl = mediaUrl.trim().replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
+      let targetType = mediaType;
+
+      try {
+        const res = await fetch(`/api/resolve?url=${encodeURIComponent(cleanUrl)}`);
+        if (res.ok) {
+          const resolved = await res.json();
+          if (resolved.streamUrl) {
+            cleanUrl = resolved.streamUrl;
+            if (resolved.mediaType) targetType = resolved.mediaType;
+          }
+        }
+      } catch (e) {
+        // Fallback to original url
+      }
+
       const room = await createRoom({
         name: roomTitle.trim() || "Watch Party",
         mediaUrl: cleanUrl,
-        mediaType,
+        mediaType: targetType,
         permissionMode,
       });
       router.push(`/room/${room.roomCode}`);

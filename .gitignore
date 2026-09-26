@@ -38,5 +38,11 @@ e2e/test-results/
 # TypeScript
 *.tsbuildinfo
 
+# Local test databases
+backend/data/
+*.sqlite
+*.db
+
 # Agents internal workdir (optional: commit or not)
 .agents/
+

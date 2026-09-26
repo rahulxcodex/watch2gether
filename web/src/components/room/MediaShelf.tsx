@@ -48,27 +48,43 @@ export function MediaShelf({
   const [selectedCatalogTitle, setSelectedCatalogTitle] = useState<Partial<LibraryTitle> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = urlInput.trim();
-    if (!url) return;
+    const rawUrl = urlInput.trim();
+    if (!rawUrl) return;
 
-    const isYouTube = url.includes("youtube.com") || url.includes("youtu.be");
-    const mediaType: MediaType = isYouTube ? "YOUTUBE" : "MP4";
-
+    let finalUrl = rawUrl;
+    const isYouTube = rawUrl.includes("youtube.com") || rawUrl.includes("youtu.be");
+    const isHls = rawUrl.includes(".m3u8") || rawUrl.includes("/hls/");
+    let mediaType: MediaType = isYouTube ? "YOUTUBE" : isHls ? "HLS" : "MP4";
     let title = titleInput.trim();
+
+    try {
+      const res = await fetch(`/api/resolve?url=${encodeURIComponent(rawUrl)}`);
+      if (res.ok) {
+        const resolved = await res.json();
+        if (resolved.streamUrl) {
+          finalUrl = resolved.streamUrl;
+          if (resolved.mediaType) mediaType = resolved.mediaType;
+          if (!title && resolved.title) title = resolved.title;
+        }
+      }
+    } catch {
+      // Fallback
+    }
+
     if (!title) {
       if (isYouTube) {
         title = "YouTube Video";
       } else {
-        const parts = url.split("/");
-        title = parts[parts.length - 1] || "Queued Video";
+        const parts = finalUrl.split("/");
+        title = parts[parts.length - 1]?.split("?")[0] || "Queued Video";
       }
     }
 
     onAddToQueue({
       title,
-      url,
+      url: finalUrl,
       mediaType,
     });
 

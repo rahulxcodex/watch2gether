@@ -29,16 +29,29 @@ export function ChatPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll to bottom
-  const scrollToBottom = () => {
-    if (typeof messagesEndRef.current?.scrollIntoView === "function") {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+  const isNearBottomRef = useRef(true);
+
+  const handleScroll = () => {
+    if (!containerRef.current) return;
+    const { scrollHeight, scrollTop, clientHeight } = containerRef.current;
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 120;
+  };
+
+  // Auto scroll to bottom only if user was already near bottom or sent a message
+  const scrollToBottom = (force = false) => {
+    if (force || isNearBottomRef.current) {
+      if (typeof messagesEndRef.current?.scrollIntoView === "function") {
+        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      }
     }
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const lastMsg = messages[messages.length - 1];
+    const isSentByMe = !!(lastMsg?.sender?.id && currentUser?.id && lastMsg.sender.id === currentUser.id);
+    scrollToBottom(isSentByMe);
+  }, [messages, currentUser?.id]);
+
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,6 +82,7 @@ export function ChatPanel({
       {/* Message Stream */}
       <div
         ref={containerRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0"
       >
         {messages.length === 0 ? (

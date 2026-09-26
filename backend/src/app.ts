@@ -5,6 +5,7 @@ import { authRoutes } from './routes/auth.routes';
 import { roomRoutes } from './routes/rooms.routes';
 import { healthRoutes } from './routes/health.routes';
 import { proxyRoutes } from './routes/proxy.routes';
+import { resolveRoutes } from './routes/resolve.routes';
 import { config } from './config';
 import { getDb, initDatabase } from './db/db';
 import { initSocketIO } from './socket/io';
@@ -67,6 +68,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(roomRoutes, { prefix: '/api/rooms' });
   await app.register(proxyRoutes);
+  await app.register(resolveRoutes, { prefix: '/api' });
 
   // Initialize Socket.io
   const io = initSocketIO(app, roomStore, redisService);

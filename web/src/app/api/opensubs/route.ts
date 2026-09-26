@@ -267,3 +267,65 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: String(e?.message || e) }, { status: 502 });
   }
 }
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const imdbId = String(searchParams.get("imdbId") || "").trim().toLowerCase();
+    const season = searchParams.get("season");
+    const episode = searchParams.get("episode");
+    const isMovie = searchParams.get("movie") === "true";
+
+    if (!validImdb(imdbId)) {
+      return NextResponse.json(
+        { error: "Valid IMDb ID (e.g. tt1234567) is required.", subtitles: [] },
+        { status: 400 }
+      );
+    }
+
+    if (!API_KEY || !OS_USER || !OS_PASS) {
+      return NextResponse.json({
+        subtitles: [],
+        message: "OpenSubtitles credentials not configured",
+      });
+    }
+
+    const session = await login();
+    let queryPath = "";
+    if (isMovie || (!season && !episode)) {
+      queryPath = `/subtitles?imdb_id=${imdbNumeric(imdbId)}&languages=en&type=movie&order_by=download_count&order_direction=desc&per_page=10`;
+    } else {
+      const s = Number(season) || 1;
+      const e = Number(episode) || 1;
+      queryPath = `/subtitles?parent_imdb_id=${imdbNumeric(imdbId)}&season_number=${s}&episode_number=${e}&languages=en&type=episode&order_by=download_count&order_direction=desc&per_page=10`;
+    }
+
+    const res = await getJson(session, queryPath);
+    const subtitles: any[] = [];
+
+    for (const item of res.data || []) {
+      const a = item.attributes || {};
+      for (const f of a.files || []) {
+        if (!f?.file_id) continue;
+        subtitles.push({
+          id: String(a.subtitle_id || item.id),
+          fileId: f.file_id,
+          fileName: f.file_name || "",
+          language: a.language || "en",
+          url: `/api/subtitles?url=${encodeURIComponent(a.url || "")}`,
+        });
+      }
+    }
+
+    return NextResponse.json({
+      imdbId,
+      subtitles,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message || "Failed to fetch subtitles", subtitles: [] },
+      { status: 500 }
+    );
+  }
+}
+

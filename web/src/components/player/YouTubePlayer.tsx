@@ -18,9 +18,33 @@ interface YouTubePlayerProps extends PlayerEvents {
 
 export function extractYouTubeId(url: string): string {
   if (!url) return "dQw4w9WgXcQ";
-  const regExp = /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/;
-  const match = url.match(regExp);
-  return match && match[7].length === 11 ? match[7] : url;
+  const trimmed = url.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+
+  try {
+    const parsed = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    if (parsed.hostname.includes("youtu.be")) {
+      const id = parsed.pathname.slice(1).split("/")[0].split("?")[0];
+      if (id && id.length === 11) return id;
+    }
+    if (parsed.searchParams.has("v")) {
+      const v = parsed.searchParams.get("v");
+      if (v && v.length === 11) return v;
+    }
+    const pathSegments = parsed.pathname.split("/").filter(Boolean);
+    const triggerIndex = pathSegments.findIndex((seg) =>
+      ["embed", "shorts", "live", "v"].includes(seg.toLowerCase())
+    );
+    if (triggerIndex !== -1 && pathSegments[triggerIndex + 1]) {
+      const id = pathSegments[triggerIndex + 1].split("?")[0];
+      if (id && id.length === 11) return id;
+    }
+  } catch {}
+
+  const fallbackMatch = trimmed.match(/(?:v=|\/embed\/|\/shorts\/|\/live\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  if (fallbackMatch && fallbackMatch[1]) return fallbackMatch[1];
+
+  return trimmed;
 }
 
 export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProps>(

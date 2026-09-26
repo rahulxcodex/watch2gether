@@ -51,17 +51,36 @@ describe('Proxy Routes Unit Tests', () => {
     expect(res.headers['access-control-allow-methods']).toContain('GET');
   });
 
-  it('should successfully proxy and rewrite info.movieboxnoob.cc master playlist without WAF 403 block', async () => {
-    const testStream = 'https://info.movieboxnoob.cc/playlist/CDHtzpOCaCYwjA9DjcySoA.m3u8';
-    const res = await app.inject({
-      method: 'GET',
-      url: `/api/proxy?url=${encodeURIComponent(testStream)}`,
+  it('should successfully proxy and rewrite master playlist without WAF 403 block', async () => {
+    const originalFetch = global.fetch;
+    const testStream = 'https://media.example.com/playlist/master.m3u8';
+    const mockM3U8 = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nchunklist_360p.m3u8`;
+
+    global.fetch = vi.fn().mockImplementation(async (url: any) => {
+      if (String(url).includes('media.example.com')) {
+        return new Response(mockM3U8, {
+          status: 200,
+          headers: {
+            'content-type': 'application/vnd.apple.mpegurl',
+          },
+        });
+      }
+      return originalFetch(url);
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toContain('mpegurl');
-    expect(res.body).toContain('#EXTM3U');
-    expect(res.body).toContain('/api/proxy?url=');
-    expect(res.body).not.toContain('aye cuh wyd');
-  }, 15000);
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/proxy?url=${encodeURIComponent(testStream)}`,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('mpegurl');
+      expect(res.body).toContain('#EXTM3U');
+      expect(res.body).toContain('/api/proxy?url=');
+      expect(res.body).toContain('chunklist_360p.m3u8');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

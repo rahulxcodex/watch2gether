@@ -111,19 +111,42 @@ export function PlayerControls({
   const [newMediaUrl, setNewMediaUrl] = useState(currentMediaUrl);
   const [showRateMenu, setShowRateMenu] = useState(false);
 
+  const [isResolvingMedia, setIsResolvingMedia] = useState(false);
   const rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
-  const handleMediaSubmit = (e: React.FormEvent) => {
+  const handleMediaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const rawUrl = newMediaUrl.trim().split(/\s+/)[0]; // strip copy-paste garbage after URL
     const cleanUrl = rawUrl.replace(/^[^a-z0-9]*(?:r|view-source:)?(https?:\/\/)/i, "$1");
     if (!cleanUrl) return;
-    const isYouTube = cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be");
-    const isHls = cleanUrl.includes(".m3u8") || cleanUrl.includes("/hls/");
-    const mediaType = isYouTube ? "YOUTUBE" : isHls ? "HLS" : "MP4";
-    onChangeMedia?.(cleanUrl, mediaType);
+
+    setIsResolvingMedia(true);
+    let resolvedUrl = cleanUrl;
+    let resolvedType: MediaType = (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be"))
+      ? "YOUTUBE"
+      : (cleanUrl.includes(".m3u8") || cleanUrl.includes("/hls/"))
+      ? "HLS"
+      : "MP4";
+
+    try {
+      const res = await fetch(`/api/resolve?url=${encodeURIComponent(cleanUrl)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.streamUrl) {
+          resolvedUrl = data.streamUrl;
+          if (data.mediaType) resolvedType = data.mediaType;
+        }
+      }
+    } catch (err) {
+      console.warn("Client resolve error:", err);
+    } finally {
+      setIsResolvingMedia(false);
+    }
+
+    onChangeMedia?.(resolvedUrl, resolvedType);
     setIsMediaDialogOpen(false);
   };
+
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -500,8 +523,8 @@ export function PlayerControls({
                 >
                   Cancel
                 </Button>
-                <Button type="submit" variant="glow" disabled={!newMediaUrl.trim()}>
-                  Switch Video
+                <Button type="submit" variant="glow" disabled={!newMediaUrl.trim() || isResolvingMedia}>
+                  {isResolvingMedia ? "Resolving Stream..." : "Switch Video"}
                 </Button>
               </DialogFooter>
             </form>

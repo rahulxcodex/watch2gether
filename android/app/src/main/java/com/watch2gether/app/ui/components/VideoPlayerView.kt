@@ -125,6 +125,7 @@ fun VideoPlayerView(
                 val uri = Uri.parse(mediaUrl)
                 val item = MediaItem.fromUri(uri)
                 exoPlayer.setMediaItem(item)
+                exoPlayer.playWhenReady = isPlaying
                 exoPlayer.prepare()
                 if (seekPosition > 0) {
                     exoPlayer.seekTo((seekPosition * 1000).toLong())
@@ -133,8 +134,11 @@ fun VideoPlayerView(
 
             // Sync play/pause state
             LaunchedEffect(isPlaying) {
-                if (isPlaying != exoPlayer.isPlaying) {
-                    if (isPlaying) exoPlayer.play() else exoPlayer.pause()
+                exoPlayer.playWhenReady = isPlaying
+                if (isPlaying) {
+                    exoPlayer.play()
+                } else {
+                    exoPlayer.pause()
                 }
             }
 
@@ -405,9 +409,12 @@ private fun YouTubePlayerComposable(
 }
 
 private fun extractYouTubeId(url: String): String {
+    val clean = url.trim()
     return when {
-        url.contains("youtu.be/") -> url.substringAfterLast("youtu.be/").substringBefore("?")
-        url.contains("v=") -> url.substringAfter("v=").substringBefore("&")
-        else -> url.substringAfterLast("/")
+        clean.contains("youtu.be/") -> clean.substringAfterLast("youtu.be/").substringBefore("?").substringBefore("&")
+        clean.contains("v=") -> clean.substringAfter("v=").substringBefore("&").substringBefore("?")
+        clean.contains("/shorts/") -> clean.substringAfterLast("/shorts/").substringBefore("?").substringBefore("&")
+        clean.contains("/embed/") -> clean.substringAfterLast("/embed/").substringBefore("?").substringBefore("&")
+        else -> clean.substringAfterLast("/").substringBefore("?").substringBefore("&")
     }
 }
