@@ -114,13 +114,10 @@ async function handleProxy(request: any, reply: any) {
     if (couldBeHlsPlaylist) {
       const buffer = await upstream.arrayBuffer();
       const magic = Buffer.from(buffer.slice(0, 16)).toString('utf-8').trimStart();
-      const text = Buffer.from(buffer).toString('utf-8');
-      const isRealHls =
-        magic.startsWith('#EXTM3U') ||
-        text.includes('#EXTINF:') ||
-        text.includes('#EXT-X-STREAM-INF:');
+      const isRealHls = magic.startsWith('#EXTM3U') || magic.startsWith('#EXT');
 
       if (isRealHls) {
+        const text = Buffer.from(buffer).toString('utf-8');
         // Derive absolute proxyBase so that all clients (browser, mobile, Android ExoPlayer)
         // resolve subplaylists, init chunks, and segments to this proxy without any relative path errors.
         const host = request.headers['x-forwarded-host'] || request.headers.host;
@@ -160,8 +157,11 @@ async function handleProxy(request: any, reply: any) {
         return reply.status(200).send(rewritten);
       }
 
-      // If it wasn't HLS, normalize MIME type if upstream disguised video/audio as text/html
+      // If it wasn't HLS, normalize MIME type if upstream disguised video/audio as image or text/html
+      const fourCc = Buffer.from(buffer.slice(4, 8)).toString('ascii');
+      const isIsoBmff = fourCc === 'ftyp' || fourCc === 'styp' || fourCc === 'moof';
       if (
+        isIsoBmff ||
         /video_|\.mp4|\.m4s|_init\./i.test(target) ||
         (contentType.includes('text/html') && /video/i.test(target))
       ) {

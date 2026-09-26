@@ -188,9 +188,24 @@ export function useSyncEngine({
           await player.seekTo(currentState.currentTime);
           setTimeout(() => {
             isProgrammaticSyncRef.current = false;
-          }, 200);
+          }, 300);
         }
         updateSyncStatusThrottled(0, "IN_SYNC");
+        return;
+      }
+
+      // If video is actively buffering, give it time to load chunks without interruption
+      if (player.isBuffering?.()) {
+        return;
+      }
+
+      // If server is playing but local player is still paused, trigger play
+      if (player.isPaused()) {
+        isProgrammaticSyncRef.current = true;
+        await player.play();
+        setTimeout(() => {
+          isProgrammaticSyncRef.current = false;
+        }, 300);
         return;
       }
 
@@ -223,7 +238,7 @@ export function useSyncEngine({
           await player.setPlaybackRate(baseRate);
           setTimeout(() => {
             isProgrammaticSyncRef.current = false;
-          }, 300);
+          }, 600);
 
           updateSyncStatusThrottled(driftAction.driftMs, "HARD_SEEKING");
           break;

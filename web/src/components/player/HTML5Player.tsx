@@ -29,6 +29,8 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
     const videoRef = useRef<HTMLVideoElement>(null);
     const hlsRef = useRef<Hls | null>(null);
     const isSeekingRef = useRef(false);
+    const isProgrammaticRef = useRef(false);
+    const isBufferingRef = useRef(false);
     const isMediaReadyRef = useRef(false);
     const pendingPlayRef = useRef(false);
     const hasTriedProxyRef = useRef(false);
@@ -47,25 +49,36 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         }
         if (videoRef.current) {
           try {
+            isProgrammaticRef.current = true;
             await videoRef.current.play();
           } catch (err) {
             console.warn("HTML5 play error:", err);
+          } finally {
+            setTimeout(() => {
+              isProgrammaticRef.current = false;
+            }, 300);
           }
         }
       },
       pause: async () => {
         pendingPlayRef.current = false;
         if (videoRef.current) {
+          isProgrammaticRef.current = true;
           videoRef.current.pause();
+          setTimeout(() => {
+            isProgrammaticRef.current = false;
+          }, 300);
         }
       },
       seekTo: async (seconds: number) => {
         if (videoRef.current) {
           isSeekingRef.current = true;
+          isProgrammaticRef.current = true;
           videoRef.current.currentTime = Math.max(0, seconds);
           setTimeout(() => {
             isSeekingRef.current = false;
-          }, 150);
+            isProgrammaticRef.current = false;
+          }, 350);
         }
       },
       setPlaybackRate: async (rate: number) => {
@@ -87,6 +100,7 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       getDuration: () => videoRef.current?.duration || 0,
       isPaused: () => (videoRef.current ? videoRef.current.paused : true),
       getPlaybackRate: () => videoRef.current?.playbackRate || 1.0,
+      isBuffering: () => isBufferingRef.current,
     };
 
     useImperativeHandle(ref, () => playerApi, []);
@@ -111,9 +125,13 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       }
 
       // Clean video element state before switching sources
+      isProgrammaticRef.current = true;
       video.pause();
       video.removeAttribute("src");
       video.load();
+      setTimeout(() => {
+        isProgrammaticRef.current = false;
+      }, 300);
 
       hasTriedProxyRef.current = false;
       let isCancelled = false;
@@ -163,16 +181,7 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
           : activeSrc;
 
         if (isHls) {
-          if (video.canPlayType("application/vnd.apple.mpegurl")) {
-            video.src = proxiedUrl;
-            video.load();
-            isMediaReadyRef.current = true;
-            onReady?.(playerApi);
-            if (pendingPlayRef.current) {
-              video.play().catch(() => {});
-              pendingPlayRef.current = false;
-            }
-          } else if (Hls.isSupported()) {
+          if (Hls.isSupported()) {
             const hls = new Hls({
               maxBufferLength: 60,
               maxMaxBufferLength: 180,
@@ -186,8 +195,12 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
               isMediaReadyRef.current = true;
               onReady?.(playerApi);
               if (pendingPlayRef.current) {
+                isProgrammaticRef.current = true;
                 video.play().catch(() => {});
                 pendingPlayRef.current = false;
+                setTimeout(() => {
+                  isProgrammaticRef.current = false;
+                }, 300);
               }
             });
 
@@ -207,6 +220,19 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
 
             hls.loadSource(proxiedUrl);
             hls.attachMedia(video);
+          } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            video.src = proxiedUrl;
+            video.load();
+            isMediaReadyRef.current = true;
+            onReady?.(playerApi);
+            if (pendingPlayRef.current) {
+              isProgrammaticRef.current = true;
+              video.play().catch(() => {});
+              pendingPlayRef.current = false;
+              setTimeout(() => {
+                isProgrammaticRef.current = false;
+              }, 300);
+            }
           } else {
             onError?.("Your browser does not support HLS streaming.");
           }
@@ -244,13 +270,21 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         playsInline
         preload="metadata"
         onPlay={() => {
-          if (!isSeekingRef.current) onPlay?.(videoRef.current?.currentTime || 0);
+          if (!isSeekingRef.current && !isProgrammaticRef.current) {
+            onPlay?.(videoRef.current?.currentTime || 0);
+          }
         }}
         onPause={() => {
-          if (!isSeekingRef.current) onPause?.(videoRef.current?.currentTime || 0);
+          if (!isSeekingRef.current && !isProgrammaticRef.current) {
+            onPause?.(videoRef.current?.currentTime || 0);
+          }
         }}
         onSeeked={() => {
-          onSeek?.(videoRef.current?.currentTime || 0);
+          const wasProgrammatic = isProgrammaticRef.current;
+          isSeekingRef.current = false;
+          if (!wasProgrammatic) {
+            onSeek?.(videoRef.current?.currentTime || 0);
+          }
         }}
         onRateChange={() => {
           onRateChange?.(videoRef.current?.playbackRate || 1.0);
@@ -260,12 +294,22 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
             onTimeUpdate?.(videoRef.current.currentTime, videoRef.current.duration || 0);
           }
         }}
-        onWaiting={() => onBuffering?.(true)}
-        onPlaying={() => onBuffering?.(false)}
+        onWaiting={() => {
+          isBufferingRef.current = true;
+          onBuffering?.(true);
+        }}
+        onPlaying={() => {
+          isBufferingRef.current = false;
+          onBuffering?.(false);
+        }}
         onEnded={() => onEnded?.()}
         onError={(e) => {
           const video = videoRef.current;
           const targetUrl = currentPlayingSrcRef.current || src;
+          const isHls = /\.m3u8(?:[?#]|$)/i.test(targetUrl) || targetUrl.includes(".m3u8") || targetUrl.includes("/hls/");
+          if (isHls) {
+            return;
+          }
           if (
             video &&
             !hasTriedProxyRef.current &&

@@ -11,6 +11,7 @@ export interface UnifiedPlayerInstance {
   getDuration: () => number;
   isPaused: () => boolean;
   getPlaybackRate: () => number;
+  isBuffering?: () => boolean;
 }
 
 export interface PlayerEvents {

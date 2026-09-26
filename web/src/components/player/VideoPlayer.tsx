@@ -247,9 +247,12 @@ export const VideoPlayer = forwardRef<UnifiedPlayerInstance, VideoPlayerProps>(
       getPlaybackRate: () => {
         return activePlayerRef.current ? activePlayerRef.current.getPlaybackRate() : playbackRate;
       },
+      isBuffering: () => {
+        return activePlayerRef.current?.isBuffering ? activePlayerRef.current.isBuffering() : isBuffering;
+      },
     };
 
-    useImperativeHandle(ref, () => unifiedApi, [currentTime, duration, isPlaying, playbackRate, isDucked]);
+    useImperativeHandle(ref, () => unifiedApi, [currentTime, duration, isPlaying, playbackRate, isDucked, isBuffering]);
 
     const handlePlayerReady = useCallback(
       (player: UnifiedPlayerInstance) => {
