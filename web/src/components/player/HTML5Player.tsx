@@ -51,8 +51,18 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
           try {
             isProgrammaticRef.current = true;
             await videoRef.current.play();
-          } catch (err) {
-            console.warn("HTML5 play error:", err);
+          } catch (err: any) {
+            if (err?.name === "NotAllowedError" && videoRef.current && !videoRef.current.muted) {
+              console.warn("Autoplay blocked with sound; muting to allow initial playback");
+              videoRef.current.muted = true;
+              try {
+                await videoRef.current.play();
+              } catch (muteErr) {
+                console.warn("Muted autoplay fallback failed:", muteErr);
+              }
+            } else {
+              console.warn("HTML5 play error:", err);
+            }
           } finally {
             setTimeout(() => {
               isProgrammaticRef.current = false;
@@ -100,7 +110,13 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       getDuration: () => videoRef.current?.duration || 0,
       isPaused: () => (videoRef.current ? videoRef.current.paused : true),
       getPlaybackRate: () => videoRef.current?.playbackRate || 1.0,
-      isBuffering: () => isBufferingRef.current,
+      isBuffering: () => {
+        if (isBufferingRef.current) return true;
+        if (videoRef.current) {
+          return videoRef.current.readyState < 3 || videoRef.current.seeking;
+        }
+        return false;
+      },
     };
 
     useImperativeHandle(ref, () => playerApi, []);
@@ -240,13 +256,25 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
           // Standard MP4 or direct video URL (load proxiedUrl if archive.org, otherwise direct with proxy fallback)
           video.src = proxiedUrl;
           if (isArchive) hasTriedProxyRef.current = true;
+          isBufferingRef.current = true;
+          onBuffering?.(true);
+
+          const onCanPlay = () => {
+            if (isCancelled) return;
+            isMediaReadyRef.current = true;
+            isBufferingRef.current = false;
+            onBuffering?.(false);
+            onReady?.(playerApi);
+            if (pendingPlayRef.current) {
+              pendingPlayRef.current = false;
+              video.play().catch(() => {});
+            }
+            video.removeEventListener("canplay", onCanPlay);
+            video.removeEventListener("loadeddata", onCanPlay);
+          };
+          video.addEventListener("canplay", onCanPlay);
+          video.addEventListener("loadeddata", onCanPlay);
           video.load();
-          isMediaReadyRef.current = true;
-          onReady?.(playerApi);
-          if (pendingPlayRef.current) {
-            video.play().catch(() => {});
-            pendingPlayRef.current = false;
-          }
         }
       };
 
@@ -269,6 +297,20 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         className={className}
         playsInline
         preload="metadata"
+        onLoadStart={() => {
+          isBufferingRef.current = true;
+          onBuffering?.(true);
+        }}
+        onSeeking={() => {
+          isSeekingRef.current = true;
+          isBufferingRef.current = true;
+          onBuffering?.(true);
+        }}
+        onCanPlay={() => {
+          isMediaReadyRef.current = true;
+          isBufferingRef.current = false;
+          onBuffering?.(false);
+        }}
         onPlay={() => {
           if (!isSeekingRef.current && !isProgrammaticRef.current) {
             onPlay?.(videoRef.current?.currentTime || 0);
@@ -282,6 +324,8 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
         onSeeked={() => {
           const wasProgrammatic = isProgrammaticRef.current;
           isSeekingRef.current = false;
+          isBufferingRef.current = false;
+          onBuffering?.(false);
           if (!wasProgrammatic) {
             onSeek?.(videoRef.current?.currentTime || 0);
           }

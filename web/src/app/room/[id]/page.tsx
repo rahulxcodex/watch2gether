@@ -87,6 +87,7 @@ export default function RoomTheaterPage() {
     emitPlay,
     emitPause,
     emitSeek,
+    emitRateChange,
     handleIncomingMediaSync,
     snapToAuthoritativeTime,
   } = useSyncEngine({
@@ -347,9 +348,20 @@ export default function RoomTheaterPage() {
   const handleSelectLocalFile = useCallback(
     (file: File) => {
       const blobUrl = URL.createObjectURL(file);
-      handleChangeMedia(blobUrl, "LOCAL_FILE", file.name);
+      setRoomDetails((prev) => ({
+        ...prev,
+        mediaUrl: blobUrl,
+        mediaType: "LOCAL_FILE",
+        name: file.name,
+      }));
+      if (socket && socket.connected) {
+        socket.emit("chat:send", {
+          roomCode,
+          text: `📁 Loaded local file "${file.name}". (Participants should select the identical local file to watch in sync)`,
+        });
+      }
     },
-    [handleChangeMedia]
+    [socket, roomCode]
   );
 
   // Handle permission toggle (Host only)
@@ -424,6 +436,7 @@ export default function RoomTheaterPage() {
               onPlay={(time) => emitPlay(time)}
               onPause={(time) => emitPause(time)}
               onSeek={(time) => emitSeek(time)}
+              onRateChange={(rate) => emitRateChange(rate)}
               onEnded={handleVideoEnded}
               onSnapSync={snapToAuthoritativeTime}
               onSendReaction={handleSendReaction}

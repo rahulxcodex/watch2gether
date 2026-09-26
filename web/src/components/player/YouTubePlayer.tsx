@@ -68,15 +68,27 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
     const ytPlayerRef = useRef<any>(null);
     const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const isSeekingRef = useRef(false);
+    const isBufferingRef = useRef(false);
+    const pendingPlayRef = useRef(false);
+    const isReadyRef = useRef(false);
     const videoId = extractYouTubeId(videoUrl);
 
     const playerApi: UnifiedPlayerInstance = {
       play: async () => {
+        if (!isReadyRef.current) {
+          pendingPlayRef.current = true;
+          return;
+        }
         if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === "function") {
-          ytPlayerRef.current.playVideo();
+          try {
+            ytPlayerRef.current.playVideo();
+          } catch (err) {
+            console.warn("YouTube play error:", err);
+          }
         }
       },
       pause: async () => {
+        pendingPlayRef.current = false;
         if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
           ytPlayerRef.current.pauseVideo();
         }
@@ -123,7 +135,10 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
       },
       isPaused: () => {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.getPlayerState === "function") {
-          return ytPlayerRef.current.getPlayerState() !== 1; // 1 = Playing
+          const state = ytPlayerRef.current.getPlayerState();
+          // YT.PlayerState: 2 = PAUSED, -1 = UNSTARTED, 5 = CUED.
+          // State 1 = PLAYING, State 3 = BUFFERING (which is NOT user-paused).
+          return state === 2 || state === -1 || state === 5;
         }
         return true;
       },
@@ -132,6 +147,13 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
           return ytPlayerRef.current.getPlaybackRate() || 1.0;
         }
         return 1.0;
+      },
+      isBuffering: () => {
+        if (isBufferingRef.current) return true;
+        if (ytPlayerRef.current && typeof ytPlayerRef.current.getPlayerState === "function") {
+          return ytPlayerRef.current.getPlayerState() === 3;
+        }
+        return false;
       },
     };
 
@@ -161,7 +183,8 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
           width: "100%",
           height: "100%",
           playerVars: {
-            autoplay: 0,
+            autoplay: 1,
+            mute: 1,
             controls: 0,
             disablekb: 1,
             enablejsapi: 1,
@@ -176,21 +199,32 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
           events: {
             onReady: () => {
               if (!isMounted) return;
+              isReadyRef.current = true;
               onReady?.(playerApi);
+              if (pendingPlayRef.current) {
+                pendingPlayRef.current = false;
+                try {
+                  ytPlayerRef.current?.playVideo();
+                } catch {}
+              }
             },
             onStateChange: (event: any) => {
               if (!isMounted) return;
               const state = event.data;
               // YT.PlayerState: -1 UNSTARTED, 0 ENDED, 1 PLAYING, 2 PAUSED, 3 BUFFERING, 5 CUED
               if (state === 1) {
+                isBufferingRef.current = false;
                 if (!isSeekingRef.current) onPlay?.(playerApi.getCurrentTime());
                 onBuffering?.(false);
               } else if (state === 2) {
+                isBufferingRef.current = false;
                 if (!isSeekingRef.current) onPause?.(playerApi.getCurrentTime());
                 onBuffering?.(false);
               } else if (state === 3) {
+                isBufferingRef.current = true;
                 onBuffering?.(true);
               } else if (state === 0) {
+                isBufferingRef.current = false;
                 onEnded?.();
               }
             },
@@ -200,6 +234,8 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
             },
             onError: (event: any) => {
               if (!isMounted) return;
+              isBufferingRef.current = false;
+              onBuffering?.(false);
               onError?.(`YouTube Error code: ${event.data}`);
             },
           },
@@ -214,9 +250,19 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
           const firstScriptTag = document.getElementsByTagName("script")[0];
           firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
         }
+        const prevCallback = window.onYouTubeIframeAPIReady;
         window.onYouTubeIframeAPIReady = () => {
+          if (prevCallback) prevCallback();
           if (isMounted) initPlayer();
         };
+        // Polling fallback if YT arrives after script tag is already in DOM
+        const checkYt = setInterval(() => {
+          if (window.YT && window.YT.Player) {
+            clearInterval(checkYt);
+            if (isMounted) initPlayer();
+          }
+        }, 100);
+        setTimeout(() => clearInterval(checkYt), 8000);
       } else {
         initPlayer();
       }

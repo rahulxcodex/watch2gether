@@ -165,6 +165,52 @@ export function registerSyncHandlers(
     }
   );
 
+  // 4b. Media Rate Change
+  socket.on(
+    'media:rate',
+    async (data: {
+      roomCode?: string;
+      playbackRate: number;
+      currentTime?: number;
+      clientTimestamp?: number;
+    }) => {
+      const roomCode = (data.roomCode || socket.data.roomCode)?.toUpperCase();
+      if (!roomCode) return;
+
+      const room = await roomStore.getRoom(roomCode);
+      if (!room) return;
+
+      if (!canControlMedia(room, socket.data.userId)) {
+        socket.emit('permission:denied', {
+          code: 'PERMISSION_DENIED',
+          message: 'Playback controls restricted to host in HOST_ONLY mode',
+          action: 'media:rate',
+        });
+        return;
+      }
+
+      const rate = Math.max(0.25, Math.min(2.0, data.playbackRate || 1.0));
+      const updated = await roomStore.updatePlayback(roomCode, {
+        playbackRate: rate,
+        currentTime: data.currentTime !== undefined ? data.currentTime : room.currentTime,
+      });
+
+      if (updated) {
+        io.to(roomCode).emit('media:sync', {
+          state: updated.playbackState,
+          status: updated.playbackState,
+          currentTime: updated.currentTime,
+          playbackRate: updated.playbackRate,
+          serverTimestamp: updated.updatedAt,
+          version: updated.version,
+          issuerId: socket.data.userId || socket.id,
+          mediaUrl: updated.mediaUrl,
+          mediaType: updated.mediaType,
+        });
+      }
+    }
+  );
+
   // 5. Media Change (supports both media:change and room:change_media)
   const handleMediaChange = async (data: {
     roomCode?: string;

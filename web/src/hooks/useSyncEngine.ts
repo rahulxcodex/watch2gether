@@ -63,6 +63,7 @@ export function useSyncEngine({
   authStateRef.current = authoritativeState;
 
   const isProgrammaticSyncRef = useRef<boolean>(false);
+  const lastHardSeekRef = useRef<number>(0);
   const lastVersionRef = useRef<number>(0);
   const lastStatusUpdateRef = useRef<number>(0);
   const lastSyncTierRef = useRef<string>("OFFLINE");
@@ -136,7 +137,10 @@ export function useSyncEngine({
       if (!player) return;
 
       // 2. Local Echo Suppression: Ignore server reflection of our own initiated action
-      if (newState.issuerId && newState.issuerId === currentUser.id) {
+      if (
+        newState.issuerId &&
+        (newState.issuerId === currentUser.id || newState.issuerId === socket?.id)
+      ) {
         return;
       }
 
@@ -168,7 +172,7 @@ export function useSyncEngine({
         }, 300);
       }
     },
-    [currentUser.id, playerRef]
+    [currentUser.id, socket, playerRef]
   );
 
   // High frequency 3-tier drift reconciliation loop (runs every 150ms)
@@ -194,8 +198,8 @@ export function useSyncEngine({
         return;
       }
 
-      // If video is actively buffering, give it time to load chunks without interruption
-      if (player.isBuffering?.()) {
+      // Suppress drift reconciliation until at least 1 NTP sample is gathered, or during buffering
+      if (syncSamplesRef.current.length === 0 || player.isBuffering?.()) {
         return;
       }
 
@@ -205,7 +209,7 @@ export function useSyncEngine({
         await player.play();
         setTimeout(() => {
           isProgrammaticSyncRef.current = false;
-        }, 300);
+        }, 400);
         return;
       }
 
@@ -231,17 +235,24 @@ export function useSyncEngine({
           updateSyncStatusThrottled(driftAction.driftMs, "SOFT_ADJUSTING");
           break;
 
-        case "HARD_SEEK":
+        case "HARD_SEEK": {
           // Tier 3: Hard seek to authoritative projection
+          // Seek-storm guard: throttle hard seeks to at most once per 2 seconds
+          const now = Date.now();
+          if (now - lastHardSeekRef.current < 2000) {
+            return;
+          }
+          lastHardSeekRef.current = now;
           isProgrammaticSyncRef.current = true;
           await player.seekTo(driftAction.targetTime);
           await player.setPlaybackRate(baseRate);
           setTimeout(() => {
             isProgrammaticSyncRef.current = false;
-          }, 600);
+          }, 800);
 
           updateSyncStatusThrottled(driftAction.driftMs, "HARD_SEEKING");
           break;
+        }
       }
     }, 150);
 
@@ -322,6 +333,23 @@ export function useSyncEngine({
     [socket, roomCode, canControl]
   );
 
+  const emitRateChange = useCallback(
+    (playbackRate: number) => {
+      if (!socket || !canControl) return;
+      isProgrammaticSyncRef.current = true;
+      socket.emit("media:rate" as any, {
+        roomCode,
+        playbackRate,
+        currentTime: playerRef.current?.getCurrentTime() || 0,
+        clientTimestamp: Date.now(),
+      });
+      setTimeout(() => {
+        isProgrammaticSyncRef.current = false;
+      }, 300);
+    },
+    [socket, roomCode, canControl, playerRef]
+  );
+
   const snapToAuthoritativeTime = useCallback(async () => {
     const player = playerRef.current;
     if (!player) return;
@@ -341,6 +369,7 @@ export function useSyncEngine({
     emitPlay,
     emitPause,
     emitSeek,
+    emitRateChange,
     handleIncomingMediaSync,
     sendSyncPing,
     snapToAuthoritativeTime,

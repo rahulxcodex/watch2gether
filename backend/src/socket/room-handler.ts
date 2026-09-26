@@ -43,7 +43,7 @@ export function registerRoomHandlers(
             name: `Room ${roomCode}`,
             hostId: userId,
             permissionMode: 'HOST_ONLY',
-            mediaUrl: '',
+            mediaUrl: 'https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-576p.mp4',
             mediaType: 'MP4',
             playbackState: 'IDLE',
             currentTime: 0,
