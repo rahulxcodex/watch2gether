@@ -260,6 +260,7 @@ export class MemoryRoomStateStore implements IRoomStateStore {
     if (!room.hostId || room.members.size === 0) {
       room.hostId = member.id;
       member.isHost = true;
+      RoomService.updateRoomHost(code, member.id).catch(() => {});
     } else if (room.hostId === member.id) {
       member.isHost = true;
     }
@@ -479,6 +480,14 @@ export class RoomService {
 
     db.update(rooms)
       .set(updatePayload)
+      .where(eq(rooms.roomCode, roomCode.toUpperCase()))
+      .run();
+  }
+
+  static async updateRoomHost(roomCode: string, hostId: string): Promise<void> {
+    const db = getDb();
+    db.update(rooms)
+      .set({ hostId, updatedAt: new Date() })
       .where(eq(rooms.roomCode, roomCode.toUpperCase()))
       .run();
   }

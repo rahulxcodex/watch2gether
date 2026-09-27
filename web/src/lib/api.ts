@@ -4,6 +4,7 @@ import {
   RoomDetailsDTO,
   AuthResponseDTO,
 } from "@watch2gether/shared";
+import { getOrCreateGuestSession } from "./guest-session";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -11,10 +12,25 @@ export async function createRoom(
   payload: CreateRoomRequestDTO = {}
 ): Promise<CreateRoomResponseDTO> {
   try {
+    let hostId = payload.hostId;
+    if (!hostId && typeof window !== "undefined") {
+      try {
+        const guest = getOrCreateGuestSession();
+        hostId = guest?.id;
+      } catch {}
+    }
+
+    const enrichedPayload: CreateRoomRequestDTO = {
+      ...payload,
+      hostId,
+      permissionMode: payload.permissionMode || "SHARED",
+    };
+
     const res = await fetch(`${API_BASE_URL}/api/rooms`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      credentials: "include",
+      body: JSON.stringify(enrichedPayload),
     });
 
     if (res.ok) {

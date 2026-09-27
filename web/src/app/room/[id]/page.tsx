@@ -131,32 +131,37 @@ export default function RoomTheaterPage() {
     const sock = getSocket();
     setSocket(sock);
 
-    if (!sock.connected) {
-      sock.connect();
-    }
+    const onConnect = () => {
+      const u = currentUserRef.current;
+      const joinPayload = {
+        roomCode,
+        user: {
+          id: u.id,
+          name: u.name,
+          avatarColor: u.avatarColor || u.color,
+          isGuest: u.isGuest,
+        },
+      };
 
-    const joinPayload = {
-      roomCode,
-      user: {
-        id: guestUser.id,
-        name: guestUser.name,
-        avatarColor: guestUser.avatarColor || guestUser.color,
-        isGuest: guestUser.isGuest,
-      },
+      sock.emit("room:join", joinPayload, (response) => {
+        if (response && response.success && response.data) {
+          const { room, users, playbackState } = response.data;
+          setRoomDetails(room);
+          setActiveUsers(users);
+          if (room.queue) setQueue(room.queue);
+          if (playbackState) {
+            incomingSyncRef.current(playbackState);
+          }
+        }
+      });
     };
 
-    // Emit room:join
-    sock.emit("room:join", joinPayload, (response) => {
-      if (response && response.success && response.data) {
-        const { room, users, playbackState } = response.data;
-        setRoomDetails(room);
-        setActiveUsers(users);
-        if (room.queue) setQueue(room.queue);
-        if (playbackState) {
-          incomingSyncRef.current(playbackState);
-        }
-      }
-    });
+    sock.on("connect", onConnect);
+    if (sock.connected) {
+      onConnect();
+    } else {
+      sock.connect();
+    }
 
     // Event Listeners
     const onRoomJoined = (payload: RoomJoinedPayload) => {
@@ -247,6 +252,13 @@ export default function RoomTheaterPage() {
     sock.on("room:member_joined", onUserJoined);
     sock.on("room:user_left", onUserLeft);
     sock.on("room:member_left", onUserLeft);
+    const onPermissionDenied = (payload: { message?: string; action?: string }) => {
+      console.warn("Permission denied by server:", payload);
+      setErrorMessage(payload?.message || "Playback controls restricted to room host.");
+      setTimeout(() => setErrorMessage(null), 4000);
+    };
+
+    sock.on("permission:denied" as any, onPermissionDenied);
     sock.on("room:media_changed", onMediaChanged);
     sock.on("room:permission_updated", onPermissionUpdated);
     sock.on("chat:message", onChatMessage);
@@ -255,6 +267,8 @@ export default function RoomTheaterPage() {
     sock.on("media:progress_update" as any, onPartnerProgress);
 
     return () => {
+      sock.off("connect", onConnect);
+      sock.off("permission:denied" as any, onPermissionDenied);
       sock.off("room:joined", onRoomJoined);
       sock.off("room:user_joined", onUserJoined);
       sock.off("room:member_joined", onUserJoined);

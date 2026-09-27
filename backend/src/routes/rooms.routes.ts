@@ -9,7 +9,8 @@ const createRoomSchema = z.object({
   name: z.string().min(1).max(100).default('Watch Room'),
   mediaUrl: z.string().default(''),
   mediaType: z.enum(['MP4', 'YOUTUBE', 'LOCAL_FILE', 'HLS']).default('MP4'),
-  permissionMode: z.enum(['HOST_ONLY', 'SHARED']).default('HOST_ONLY'),
+  permissionMode: z.enum(['HOST_ONLY', 'SHARED']).default('SHARED'),
+  hostId: z.string().optional(),
 });
 
 const generateRoomCode = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 6);
@@ -30,40 +31,45 @@ export const roomRoutes: FastifyPluginAsync = async (fastify) => {
     let userId: string;
     let userName: string;
 
-    // Check if authenticated
-    try {
-      const authHeader = request.headers.authorization;
-      let decoded: any;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        decoded = await request.jwtVerify();
-      } else if (request.cookies.w2g_token) {
-        decoded = await request.jwtVerify({ onlyCookie: true });
-      } else {
-        throw new Error('No token');
-      }
-      userId = decoded.id;
-      userName = decoded.name;
-    } catch {
-      // Auto-provision guest user for frictionless room creation
-      const code = generateRoomCode();
-      const newGuest = await UserService.createUser({
-        id: `usr_${nanoid(10)}`,
-        name: `Host ${code}`,
-        isGuest: true,
-      });
-      userId = newGuest.id;
-      userName = newGuest.name;
+    if (parseResult.data.hostId) {
+      userId = parseResult.data.hostId;
+      userName = `Host ${parseResult.data.hostId.slice(-4)}`;
+    } else {
+      // Check if authenticated
+      try {
+        const authHeader = request.headers.authorization;
+        let decoded: any;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+          decoded = await request.jwtVerify();
+        } else if (request.cookies.w2g_token) {
+          decoded = await request.jwtVerify({ onlyCookie: true });
+        } else {
+          throw new Error('No token');
+        }
+        userId = decoded.id;
+        userName = decoded.name;
+      } catch {
+        // Auto-provision guest user for frictionless room creation
+        const code = generateRoomCode();
+        const newGuest = await UserService.createUser({
+          id: `usr_${nanoid(10)}`,
+          name: `Host ${code}`,
+          isGuest: true,
+        });
+        userId = newGuest.id;
+        userName = newGuest.name;
 
-      const token = fastify.jwt.sign(
-        { id: userId, name: userName, isGuest: true },
-        { expiresIn: '7d' }
-      );
-      reply.setCookie('w2g_token', token, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: 7 * 86400,
-      });
+        const token = fastify.jwt.sign(
+          { id: userId, name: userName, isGuest: true },
+          { expiresIn: '7d' }
+        );
+        reply.setCookie('w2g_token', token, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 7 * 86400,
+        });
+      }
     }
 
     const { name, mediaUrl, mediaType, permissionMode } = parseResult.data;

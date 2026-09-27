@@ -507,7 +507,7 @@ export function PlayerControls({
                   <li
                     className="cursor-pointer hover:underline"
                     onClick={() =>
-                      setNewMediaUrl("https://nebula.bright67.online/hls/919e367f-1ffd-41c2-9c29-6c9288646556/master.m3u8")
+                      setNewMediaUrl("https://nebula.bright67.online/hls/fc41ca3d-7be1-4516-868f-8ab033b970da/master.m3u8")
                     }
                   >
                     • Nebula Bright HLS Stream

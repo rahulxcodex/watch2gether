@@ -24,9 +24,10 @@ export function registerSyncHandlers(
 
   // Helper: Validate playback permissions
   const canControlMedia = (room: any, userId?: string): boolean => {
-    if (!userId) return false;
+    if (!room) return false;
     if (room.permissionMode === 'SHARED') return true;
-    return room.hostId === userId;
+    if (!userId) return false;
+    return room.hostId === userId || !room.hostId;
   };
 
   // 2. Media Play

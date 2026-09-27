@@ -77,6 +77,7 @@ export interface CreateRoomRequestDTO {
   mediaUrl?: string;
   mediaType?: MediaType;
   permissionMode?: PermissionMode;
+  hostId?: string;
 }
 
 /**

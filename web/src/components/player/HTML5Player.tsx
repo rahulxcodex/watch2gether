@@ -39,7 +39,8 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
     const backendUrl = typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
       ? process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "")
       : "";
-    const proxyBase = backendUrl ? `${backendUrl}/api/proxy?url=` : `/api/proxy?url=`;
+    // Web client always uses same-origin edge proxy to avoid Render cold-start lag & CORS
+    const proxyBase = "/api/proxy?url=";
 
     const playerApi: UnifiedPlayerInstance = {
       play: async () => {
@@ -202,6 +203,11 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
               maxBufferLength: 60,
               maxMaxBufferLength: 180,
               backBufferLength: 60,
+              capLevelToPlayerSize: true,
+              fragLoadingMaxRetry: 2,
+              fragLoadingRetryDelay: 500,
+              fragLoadingMaxRetryTimeout: 4000,
+              levelLoadingMaxRetry: 2,
               enableWorker: true,
             });
 
@@ -210,6 +216,18 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
               isMediaReadyRef.current = true;
               onReady?.(playerApi);
+
+              // If stream has multiple variant levels, check if 720p or stable level exists
+              // and start with it to prevent upstream 1080p missing segment stalls
+              if (hls.levels && hls.levels.length > 1) {
+                const stableLevelIdx = hls.levels.findIndex(
+                  (lvl) => lvl.height === 720 || lvl.name?.includes("720")
+                );
+                if (stableLevelIdx !== -1) {
+                  hls.currentLevel = stableLevelIdx;
+                }
+              }
+
               if (pendingPlayRef.current) {
                 isProgrammaticRef.current = true;
                 video.play().catch(() => {});
@@ -221,6 +239,15 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
             });
 
             hls.on(Hls.Events.ERROR, (_evt, data) => {
+              if (data?.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
+                // If a segment 404s/fails on upstream CDN, fall back to stable level if available
+                if (hls.levels && hls.levels.length > 1 && hls.currentLevel > 0) {
+                  console.warn(`Fragment load error on level ${hls.currentLevel}, falling back to stable level 0`);
+                  hls.currentLevel = 0;
+                  hls.startLoad();
+                  return;
+                }
+              }
               if (data?.fatal) {
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                   hls.startLoad();
