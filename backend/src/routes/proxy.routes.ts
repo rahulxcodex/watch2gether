@@ -177,7 +177,7 @@ async function handleProxy(request: any, reply: any) {
 
     // Media streaming (segments, MP4s): normalize disguised MIME types
     if (
-      /video_|\.mp4|\.m4s|_init\./i.test(target) ||
+      /video_|\.mp4|\.m4s|_init\.|\.(?:jpg|jpeg|png)(?:$|[?#])/i.test(target) ||
       (contentType.includes('text/html') && /video/i.test(target))
     ) {
       reply.header('content-type', 'video/mp4');

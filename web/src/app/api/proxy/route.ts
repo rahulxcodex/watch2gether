@@ -170,9 +170,12 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
       }
 
       // If it wasn't HLS, normalize MIME type if upstream disguised video/audio as text/html
+      const fourCc = Buffer.from(buffer.slice(4, 8)).toString("ascii");
+      const isIsoBmff = fourCc === "ftyp" || fourCc === "styp" || fourCc === "moof";
       if (
-        /video_|\.mp4|\.m4s|_init\./i.test(target) ||
-        contentType.includes("text/html") && /video/i.test(target)
+        isIsoBmff ||
+        /video_|\.mp4|\.m4s|_init\.|\.(?:jpg|jpeg|png)(?:$|[?#])/i.test(target) ||
+        (contentType.includes("text/html") && /video/i.test(target))
       ) {
         responseHeaders.set("content-type", "video/mp4");
       } else if (/audio_/i.test(target)) {
@@ -189,8 +192,8 @@ async function handleProxyRequest(req: NextRequest, method: "GET" | "HEAD") {
 
     // Media streaming (segments, MP4s): normalize disguised MIME types
     if (
-      /video_|\.mp4|\.m4s|_init\./i.test(target) ||
-      contentType.includes("text/html") && /video/i.test(target)
+      /video_|\.mp4|\.m4s|_init\.|\.(?:jpg|jpeg|png)(?:$|[?#])/i.test(target) ||
+      (contentType.includes("text/html") && /video/i.test(target))
     ) {
       responseHeaders.set("content-type", "video/mp4");
     } else if (/audio_/i.test(target)) {

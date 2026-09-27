@@ -113,7 +113,7 @@ export const HTML5Player = forwardRef<UnifiedPlayerInstance, HTML5PlayerProps>(
       isBuffering: () => {
         if (isBufferingRef.current) return true;
         if (videoRef.current) {
-          return videoRef.current.readyState < 3 || videoRef.current.seeking;
+          return videoRef.current.seeking || (!videoRef.current.paused && videoRef.current.readyState < 3);
         }
         return false;
       },

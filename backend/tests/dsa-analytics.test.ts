@@ -77,10 +77,18 @@ describe('DSA & Data Science Backend Integration Tests', () => {
       roomCode,
       item: { id: 'q2', title: 'Video 2', url: 'https://example.com/2.mp4', mediaType: 'MP4', createdAt: 200 },
     });
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 100));
 
     // Upvote item 2 so it ranks higher
-    const updatePromise = new Promise<any>((resolve) => client.on('queue:updated', resolve));
+    const updatePromise = new Promise<any>((resolve) => {
+      const handler = (data: any) => {
+        if (data.queue && data.queue[0]?.id === 'q2') {
+          client.off('queue:updated', handler);
+          resolve(data);
+        }
+      };
+      client.on('queue:updated', handler);
+    });
     client.emit('queue:vote', { roomCode, itemId: 'q2', delta: 5 });
     const payload = await updatePromise;
 

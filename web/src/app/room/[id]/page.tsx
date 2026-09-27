@@ -118,13 +118,16 @@ export default function RoomTheaterPage() {
     }
   }, [roomCode, roomDetails.name]);
 
+  const incomingSyncRef = useRef(handleIncomingMediaSync);
+  incomingSyncRef.current = handleIncomingMediaSync;
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+
   // Connect to Socket and Join Room
   useEffect(() => {
     if (!roomCode) return;
 
-    const guestUser = getOrCreateGuestSession();
-    setCurrentUser(guestUser);
-
+    const guestUser = currentUserRef.current;
     const sock = getSocket();
     setSocket(sock);
 
@@ -150,7 +153,7 @@ export default function RoomTheaterPage() {
         setActiveUsers(users);
         if (room.queue) setQueue(room.queue);
         if (playbackState) {
-          handleIncomingMediaSync(playbackState);
+          incomingSyncRef.current(playbackState);
         }
       }
     });
@@ -161,7 +164,7 @@ export default function RoomTheaterPage() {
       setActiveUsers(payload.users || []);
       if (payload.room.queue) setQueue(payload.room.queue);
       if (payload.playbackState) {
-        handleIncomingMediaSync(payload.playbackState);
+        incomingSyncRef.current(payload.playbackState);
       }
     };
 
@@ -234,7 +237,7 @@ export default function RoomTheaterPage() {
     };
 
     const onPartnerProgress = (payload: PartnerProgressDTO) => {
-      if (payload.userId !== currentUser.id) {
+      if (payload.userId !== currentUserRef.current.id) {
         setPartnerProgress(payload);
       }
     };
@@ -264,7 +267,7 @@ export default function RoomTheaterPage() {
       sock.off("queue:updated" as any, onQueueUpdated);
       sock.off("media:progress_update" as any, onPartnerProgress);
     };
-  }, [roomCode, currentUser.id, handleIncomingMediaSync]);
+  }, [roomCode]);
 
   // Periodic playhead progress reporter for Dual Scrubber (every 1 second)
   useEffect(() => {

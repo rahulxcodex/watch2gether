@@ -21,4 +21,20 @@ describe("Unified Player - YouTube ID Extraction", () => {
     const id = "dQw4w9WgXcQ";
     expect(extractYouTubeId(id)).toBe("dQw4w9WgXcQ");
   });
+
+  it("should extract video ID from user target URL", () => {
+    const url = "https://youtu.be/w2ZikHCMBMI";
+    expect(extractYouTubeId(url)).toBe("w2ZikHCMBMI");
+  });
+});
+
+describe("Socket Singleton Invariant", () => {
+  it("should return the exact same instance across multiple calls", async () => {
+    const { getSocket, disconnectSocket } = await import("@/lib/socket");
+    disconnectSocket();
+    const s1 = getSocket();
+    const s2 = getSocket();
+    expect(s1).toBe(s2);
+    disconnectSocket();
+  });
 });

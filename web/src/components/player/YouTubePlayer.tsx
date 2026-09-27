@@ -68,6 +68,7 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
     const ytPlayerRef = useRef<any>(null);
     const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const isSeekingRef = useRef(false);
+    const isProgrammaticRef = useRef(false);
     const isBufferingRef = useRef(false);
     const pendingPlayRef = useRef(false);
     const isReadyRef = useRef(false);
@@ -81,7 +82,11 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
         }
         if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === "function") {
           try {
+            isProgrammaticRef.current = true;
             ytPlayerRef.current.playVideo();
+            setTimeout(() => {
+              isProgrammaticRef.current = false;
+            }, 600);
           } catch (err) {
             console.warn("YouTube play error:", err);
           }
@@ -90,16 +95,22 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
       pause: async () => {
         pendingPlayRef.current = false;
         if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === "function") {
+          isProgrammaticRef.current = true;
           ytPlayerRef.current.pauseVideo();
+          setTimeout(() => {
+            isProgrammaticRef.current = false;
+          }, 600);
         }
       },
       seekTo: async (seconds: number) => {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === "function") {
           isSeekingRef.current = true;
+          isProgrammaticRef.current = true;
           ytPlayerRef.current.seekTo(Math.max(0, seconds), true);
           setTimeout(() => {
             isSeekingRef.current = false;
-          }, 200);
+            isProgrammaticRef.current = false;
+          }, 1200);
         }
       },
       setPlaybackRate: async (rate: number) => {
@@ -183,7 +194,7 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
           width: "100%",
           height: "100%",
           playerVars: {
-            autoplay: 1,
+            autoplay: 0,
             mute: 1,
             controls: 0,
             disablekb: 1,
@@ -214,12 +225,16 @@ export const YouTubePlayer = forwardRef<UnifiedPlayerInstance, YouTubePlayerProp
               // YT.PlayerState: -1 UNSTARTED, 0 ENDED, 1 PLAYING, 2 PAUSED, 3 BUFFERING, 5 CUED
               if (state === 1) {
                 isBufferingRef.current = false;
-                if (!isSeekingRef.current) onPlay?.(playerApi.getCurrentTime());
                 onBuffering?.(false);
+                if (!isSeekingRef.current && !isProgrammaticRef.current) {
+                  onPlay?.(playerApi.getCurrentTime());
+                }
               } else if (state === 2) {
                 isBufferingRef.current = false;
-                if (!isSeekingRef.current) onPause?.(playerApi.getCurrentTime());
                 onBuffering?.(false);
+                if (!isSeekingRef.current && !isProgrammaticRef.current) {
+                  onPause?.(playerApi.getCurrentTime());
+                }
               } else if (state === 3) {
                 isBufferingRef.current = true;
                 onBuffering?.(true);

@@ -8,7 +8,7 @@ const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhos
 let socketInstance: TypedSocket | null = null;
 
 export function getSocket(token?: string): TypedSocket {
-  if (!socketInstance || !socketInstance.connected) {
+  if (!socketInstance) {
     socketInstance = io(SOCKET_SERVER_URL, {
       autoConnect: false,
       transports: ["websocket", "polling"],
